@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-config
+  namespace: edf
+data:
+  SERVER_PORT: "8080"
+
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+
+  AI_SERVICE_URL: "http://ai-service:8000"
+
+  JWT_ACCESS_EXP: "3600"
+  JWT_REFRESH_EXP: "604800"
+
+  FILE_UPLOAD_DIR: "/app/uploads"

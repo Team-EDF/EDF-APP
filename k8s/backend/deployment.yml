@@ -1,0 +1,179 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-depl
+  namespace: edf
+  labels:
+    app: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+  template:
+    metadata:
+      labels:
+        app: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: "/actuator/prometheus"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: backend-container
+          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: DB_URL
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: DB_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: JWT_SECRET
+
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: REDIS_PORT
+            - name: AI_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: AI_SERVICE_URL
+            - name: SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: SERVER_PORT
+            
+            - name: MAIL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: MAIL_USERNAME
+            - name: MAIL_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: MAIL_APP_PASSWORD
+
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: GOOGLE_CLIENT_SECRET
+
+            - name: NAVER_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: NAVER_CLIENT_ID
+            - name: NAVER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: NAVER_CLIENT_SECRET
+
+            - name: KAKAO_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: KAKAO_CLIENT_ID
+            - name: KAKAO_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: KAKAO_CLIENT_SECRET
+
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: GOOGLE_API_KEY
+            - name: GOOGLE_MAPS_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: GOOGLE_MAPS_ID
+            - name: KAKAO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: KAKAO_API_KEY
+
+            - name: JWT_ACCESS_EXP
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: JWT_ACCESS_EXP
+            - name: JWT_REFRESH_EXP
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: JWT_REFRESH_EXP
+            - name: FILE_UPLOAD_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: FILE_UPLOAD_DIR    
+
+            - name: FIREBASE_SERVICE_ACCOUNT_PATH
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: FIREBASE_SERVICE_ACCOUNT_PATH                          
+
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3

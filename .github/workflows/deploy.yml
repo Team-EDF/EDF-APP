@@ -1,0 +1,158 @@
+name: deploy edf app
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ap-northeast-2
+  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
+  BRANCH: ${{ vars.BRANCH }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - name: Checkout GitHub
+        uses: actions/checkout@v4
+
+      - name: Create IMAGE_TAG with GITHUB_SHA
+        id: image_tag
+        run: |
+          IMAGE_TAG=${GITHUB_SHA::7}
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Detect changed services
+        if: github.event_name == 'push'
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+            frontend:
+              - 'frontend/**'
+            ai:
+              - 'ai/**'
+
+      - name: Stop if no service changed
+        if: |
+          github.event_name == 'push' &&
+          steps.changes.outputs.backend != 'true' &&
+          steps.changes.outputs.frontend != 'true' &&
+          steps.changes.outputs.ai != 'true'
+        run: |
+          echo "No service directory changed. Skip build & deploy."
+          exit 0
+
+      - name: Install yq
+        run: |
+          sudo wget -O /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.44.2/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Build and push backend image
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.backend == 'true'
+        env:
+          REPOSITORY: edf-backend
+          DOCKERFILE_PATH: ./backend/Dockerfile
+          BUILD_CONTEXT: ./backend
+        run: |
+          docker build \
+            -t ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG} \
+            -f ${DOCKERFILE_PATH} ${BUILD_CONTEXT}
+
+          docker push ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG}
+
+      - name: Build and push frontend image
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.frontend == 'true'
+        env:
+          REPOSITORY: edf-frontend
+          DOCKERFILE_PATH: ./frontend/Dockerfile
+          BUILD_CONTEXT: ./frontend
+        run: |
+          docker build \
+            -t ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG} \
+            -f ${DOCKERFILE_PATH} ${BUILD_CONTEXT}
+
+          docker push ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG}
+
+      - name: Build and push ai image
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.ai == 'true'
+        env:
+          REPOSITORY: edf-ai
+          DOCKERFILE_PATH: ./ai/Dockerfile
+          BUILD_CONTEXT: ./ai
+        run: |
+          docker build \
+            -t ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG} \
+            -f ${DOCKERFILE_PATH} ${BUILD_CONTEXT}
+
+          docker push ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG}
+
+      - name: Update backend image tag
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.backend == 'true'
+        env:
+          FULL_IMAGE: ${{ vars.ECR_REGISTRY }}/edf-backend:${{ steps.image_tag.outputs.image_tag }}
+          FILE_PATH: ./k8s/backend/deployment.yml
+        run: |
+          yq -i '
+            (.spec.template.spec.containers[] | select(.name == "backend-container").image) = strenv(FULL_IMAGE)
+          ' "${FILE_PATH}"
+
+      - name: Update frontend image tag
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.frontend == 'true'
+        env:
+          FULL_IMAGE: ${{ vars.ECR_REGISTRY }}/edf-frontend:${{ steps.image_tag.outputs.image_tag }}
+          FILE_PATH: ./k8s/frontend/deployment.yml
+        run: |
+          yq -i '
+            (.spec.template.spec.containers[] | select(.name == "frontend-container").image) = strenv(FULL_IMAGE)
+          ' "${FILE_PATH}"
+
+      - name: Update ai image tag
+        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.ai == 'true'
+        env:
+          FULL_IMAGE: ${{ vars.ECR_REGISTRY }}/edf-ai:${{ steps.image_tag.outputs.image_tag }}
+          FILE_PATH: ./k8s/ai/deployment.yml
+        run: |
+          yq -i '
+            (.spec.template.spec.containers[] | select(.name == "ai-container").image) = strenv(FULL_IMAGE)
+          ' "${FILE_PATH}"
+
+      - name: Configure git identity
+        run: |
+          git config user.name "${{ vars.USER_NAME }}"
+          git config user.email "${{ vars.USER_EMAIL }}"
+
+      - name: Commit and push manifest changes
+        run: |
+          git add ./k8s/backend/deployment.yml \
+                  ./k8s/frontend/deployment.yml \
+                  ./k8s/ai/deployment.yml
+
+          if git diff --cached --quiet; then
+            echo "No manifest changes to commit."
+            exit 0
+          fi
+
+          git commit -m "chore: update image tags to ${IMAGE_TAG}"
+          git push origin "${BRANCH}"

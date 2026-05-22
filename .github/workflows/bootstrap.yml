@@ -1,0 +1,143 @@
+name: argocd bootstrap
+
+on:
+  workflow_dispatch:
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout GitHub
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::398875891485:role/github-actions-app-role-edf
+          aws-region: ap-northeast-2
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region ap-northeast-2 \
+            --name edf-cluster
+
+      - name: Install cluster addons
+        run: |
+          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+          kubectl apply -k https://github.com/kubernetes/kube-state-metrics/examples/standard
+
+      - name: Install AWS Load Balancer Controller
+        run: |
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo update eks
+
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+            -n kube-system \
+            --set clusterName=edf-cluster \
+            --set serviceAccount.create=false \
+            --set serviceAccount.name=aws-load-balancer-controller \
+            --set region=ap-northeast-2 \
+            --set vpcId=${{ secrets.VPC_ID }}
+      
+      - name: Create EDF namespace
+        run: |
+          kubectl create namespace edf --dry-run=client -o yaml | kubectl apply -f -            
+
+      - name: Install ArgoCD
+        run: |
+          kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
+          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side --force-conflicts 
+
+      - name: Create backend-secret
+        env:
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          KAKAO_CLIENT_ID: ${{ secrets.KAKAO_CLIENT_ID }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_MAPS_ID: ${{ secrets.GOOGLE_MAPS_ID }}
+          KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
+        run: |
+          kubectl create secret generic backend-secret \
+            --from-literal=DB_URL="${DB_URL}" \
+            --from-literal=DB_USERNAME="${DB_USERNAME}" \
+            --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
+            --from-literal=JWT_SECRET="${JWT_SECRET}" \
+            --from-literal=MAIL_USERNAME="${MAIL_USERNAME}" \
+            --from-literal=MAIL_APP_PASSWORD="${MAIL_APP_PASSWORD}" \
+            --from-literal=GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
+            --from-literal=GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
+            --from-literal=NAVER_CLIENT_ID="${NAVER_CLIENT_ID}" \
+            --from-literal=NAVER_CLIENT_SECRET="${NAVER_CLIENT_SECRET}" \
+            --from-literal=KAKAO_CLIENT_ID="${KAKAO_CLIENT_ID}" \
+            --from-literal=KAKAO_CLIENT_SECRET="${KAKAO_CLIENT_SECRET}" \
+            --from-literal=GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
+            --from-literal=GOOGLE_MAPS_ID="${GOOGLE_MAPS_ID}" \
+            --from-literal=KAKAO_API_KEY="${KAKAO_API_KEY}" \
+            -n edf \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create ai-secret
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          kubectl create secret generic ai-secret \
+            --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY}" \
+            -n edf \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Create ArgoCD repo secret
+        env:
+          GITHUB_USERNAME: ${{ vars.USER_NAME }}
+          GITOPS_REPO_URL: https://github.com/${{ vars.REPO }}.git
+          GH_PAT: ${{ secrets.GH_PAT }}
+        run: |
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: gitops-repo-secret
+            namespace: argocd
+            labels:
+              argocd.argoproj.io/secret-type: repository
+          stringData:
+            type: git
+            url: ${GITOPS_REPO_URL}
+            username: ${GITHUB_USERNAME}
+            password: ${GH_PAT}
+          EOF
+
+      - name: Install monitoring stack
+        run: |
+          kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo update prometheus-community
+
+          helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+            -n monitoring \
+            -f k8s/monitoring/values.yml       
+
+      - name: Apply root-app
+        run: |
+          kubectl apply -f argocd/root-app.yml
