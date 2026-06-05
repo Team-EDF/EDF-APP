@@ -1,0 +1,9 @@
+[submodule "backend/EDF-BE"]
+	path = backend/EDF-BE
+	url = git@github.com:Team-EDF/EDF-BE.git
+[submodule "frontend/EDF-FE"]
+	path = frontend/EDF-FE
+	url = git@github.com:Team-EDF/EDF-FE.git
+[submodule "ai/EDF-AI"]
+	path = ai/EDF-AI
+	url = git@github.com:Team-EDF/EDF-AI.git
