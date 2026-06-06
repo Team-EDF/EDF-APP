@@ -1,7 +1,4 @@
-# =========================
-# 1단계: Build Stage 
-# =========================
-FROM gradle:8.7-jdk17 AS builder
+FROM gradle:8.7-jdk21 AS builder
 
 WORKDIR /app
 
@@ -16,10 +13,7 @@ COPY src ./src
 RUN ./gradlew clean bootJar -x test
 
 
-# =========================
-# 2단계: Runtime Stage
-# =========================
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
