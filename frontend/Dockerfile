@@ -5,11 +5,11 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package*.json ./
+COPY EDF-FE/package*.json ./
 
 RUN npm install
 
-COPY . .
+COPY EDF-FE/ .
 
 RUN npm run build
 

@@ -2,13 +2,13 @@ FROM gradle:8.7-jdk21 AS builder
 
 WORKDIR /app
 
-COPY build.gradle settings.gradle ./
-COPY gradle ./gradle
-COPY gradlew ./
+COPY EDF-BE/build.gradle EDF-BE/settings.gradle ./
+COPY EDF-BE/gradle ./gradle
+COPY EDF-BE/gradlew ./
 
 RUN chmod +x gradlew
 
-COPY src ./src
+COPY EDF-BE/src ./src
 
 RUN ./gradlew clean bootJar -x test
 

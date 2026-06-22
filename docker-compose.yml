@@ -2,136 +2,128 @@ version: '3.9'
 
 services:
 
-postgres:
-image: postgres:16
-container_name: edf-postgres
-restart: unless-stopped
-
-```
-environment:
-  POSTGRES_DB: ${DB_NAME}
-  POSTGRES_USER: ${DB_USERNAME}
-  POSTGRES_PASSWORD: ${DB_PASSWORD}
-
-ports:
-  - "5432:5432"
-
-volumes:
-  - edf_postgres_data:/var/lib/postgresql/data
-
-healthcheck:
-  test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME}"]
-  interval: 10s
-  timeout: 5s
-  retries: 5
-
-networks:
-  - edf-network
-```
-
-redis:
-image: redis:7
-container_name: edf-redis
-restart: unless-stopped
-
-```
-ports:
-  - "6379:6379"
-
-volumes:
-  - edf_redis_data:/data
-
-healthcheck:
-  test: ["CMD", "redis-cli", "ping"]
-  interval: 10s
-  timeout: 5s
-  retries: 5
-
-networks:
-  - edf-network
-```
-
-ai:
-build:
-context: ./ai
-dockerfile: Dockerfile
-
-```
-container_name: edf-ai
-restart: unless-stopped
-
-env_file:
-  - .env
-
-ports:
-  - "8000:8000"
-
-depends_on:
   postgres:
-    condition: service_healthy
+    image: postgres:16
+    container_name: edf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-edf}
+      POSTGRES_USER: ${DB_USERNAME:-kyujin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - edf_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-kyujin} -d ${DB_NAME:-edf}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - edf-network
 
-networks:
-  - edf-network
-```
-
-backend:
-build:
-context: ./backend
-dockerfile: Dockerfile
-
-```
-container_name: edf-backend
-restart: unless-stopped
-
-env_file:
-  - .env
-
-ports:
-  - "8080:8080"
-
-depends_on:
-  postgres:
-    condition: service_healthy
+  ai-postgres:
+    image: pgvector/pgvector:pg16
+    container_name: edf-ai-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: edf_ai
+      POSTGRES_USER: ${DB_USERNAME:-kyujin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-password}
+    ports:
+      - "5433:5432"
+    volumes:
+      - edf_ai_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${DB_USERNAME:-kyujin} -d edf_ai"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - edf-network
 
   redis:
-    condition: service_healthy
+    image: redis:7
+    container_name: edf-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - edf_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - edf-network
 
   ai:
-    condition: service_started
+    build:
+      context: ./ai
+      dockerfile: Dockerfile
+    container_name: edf-ai
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      ai-postgres:
+        condition: service_healthy
+    volumes:
+      - ./credentials:/credentials:ro
+    environment:
+      - AI_DB_HOST=ai-postgres
+      - AI_DB_PORT=5432
+      - AI_DB_NAME=edf_ai
+      - AI_DB_USER=${DB_USERNAME:-kyujin}
+      - AI_DB_PASS=${DB_PASSWORD:-password}
+    networks:
+      - edf-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: edf-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      ai:
+        condition: service_started
+    volumes:
+      - ./uploads:/uploads
+    networks:
+      - edf-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: edf-frontend
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - edf-network
 
 volumes:
-  - ./uploads:/uploads
+  edf_postgres_data:
+  edf_ai_postgres_data:
+  edf_redis_data:
 
 networks:
-  - edf-network
-```
-
-frontend:
-build:
-context: ./frontend
-dockerfile: Dockerfile
-
-```
-container_name: edf-frontend
-restart: unless-stopped
-
-env_file:
-  - .env
-
-ports:
-  - "5173:5173"
-
-depends_on:
-  - backend
-
-networks:
-  - edf-network
-```
-
-volumes:
-edf_postgres_data:
-edf_redis_data:
-
-networks:
-edf-network:
-driver: bridge
+  edf-network:
+    driver: bridge
