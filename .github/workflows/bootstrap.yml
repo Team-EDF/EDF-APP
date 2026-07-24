@@ -1,7 +1,18 @@
-name: argocd bootstrap
+name: Bootstrap EDF Platform
 
 on:
   workflow_dispatch:
+
+concurrency:
+  group: edf-platform-bootstrap
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-northeast-2
+  EKS_CLUSTER_NAME: edf-cluster
+  EDF_NAMESPACE: edf
+  ARGOCD_NAMESPACE: argocd
+  MONITORING_NAMESPACE: monitoring
 
 jobs:
   bootstrap:
@@ -12,55 +23,195 @@ jobs:
       contents: read
 
     steps:
-      - name: Checkout GitHub
+      - name: Checkout EDF-APP
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::398875891485:role/github-actions-app-role-edf
-          aws-region: ap-northeast-2
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup kubectl
+      - name: Set up kubectl
         uses: azure/setup-kubectl@v4
 
-      - name: Setup Helm
+      - name: Set up Helm
         uses: azure/setup-helm@v4
 
-      - name: Update kubeconfig
+      - name: Validate required bootstrap values
+        env:
+          VPC_ID: ${{ secrets.VPC_ID }}
+          DB_URL: ${{ secrets.DB_URL }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          KAKAO_CLIENT_ID: ${{ secrets.KAKAO_CLIENT_ID }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_MAPS_ID: ${{ secrets.GOOGLE_MAPS_ID }}
+          KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_USERNAME: ${{ vars.USER_NAME }}
+          GITOPS_REPOSITORY: ${{ vars.REPO }}
+        shell: bash
         run: |
-          aws eks update-kubeconfig \
-            --region ap-northeast-2 \
-            --name edf-cluster
+          set -euo pipefail
 
-      - name: Install cluster addons
+          required_names=(
+            VPC_ID
+            DB_URL
+            DB_USERNAME
+            DB_PASSWORD
+            JWT_SECRET
+            MAIL_USERNAME
+            MAIL_APP_PASSWORD
+            GOOGLE_CLIENT_ID
+            GOOGLE_CLIENT_SECRET
+            NAVER_CLIENT_ID
+            NAVER_CLIENT_SECRET
+            KAKAO_CLIENT_ID
+            KAKAO_CLIENT_SECRET
+            GOOGLE_API_KEY
+            GOOGLE_MAPS_ID
+            KAKAO_API_KEY
+            OPENAI_API_KEY
+            GH_PAT
+            GITHUB_USERNAME
+            GITOPS_REPOSITORY
+          )
+
+          for name in "${required_names[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Required GitHub Secret or Variable is missing: ${name}"
+              exit 1
+            fi
+          done
+
+      - name: Update EKS kubeconfig
+        shell: bash
         run: |
-          kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
-          kubectl apply -k https://github.com/kubernetes/kube-state-metrics/examples/standard
+          set -euo pipefail
+
+          aws eks update-kubeconfig \
+            --region "${AWS_REGION}" \
+            --name "${EKS_CLUSTER_NAME}"
+
+      - name: Verify EKS access
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl cluster-info
+          kubectl get nodes -o wide
+
+          if [[ "$(kubectl auth can-i create namespace)" != "yes" ]]; then
+            echo "::error::The GitHub Actions role does not have sufficient EKS permissions."
+            exit 1
+          fi
+
+      - name: Create platform namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for namespace in \
+            "${EDF_NAMESPACE}" \
+            "${ARGOCD_NAMESPACE}" \
+            "${MONITORING_NAMESPACE}"; do
+            kubectl create namespace "${namespace}" \
+              --dry-run=client \
+              -o yaml | kubectl apply -f -
+          done
+
+      - name: Install Metrics Server
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl apply -f \
+            https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+          kubectl rollout status deployment/metrics-server \
+            -n kube-system \
+            --timeout=5m
+
+      - name: Install kube-state-metrics
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl apply -k \
+            https://github.com/kubernetes/kube-state-metrics/examples/standard
+
+      - name: Verify AWS Load Balancer Controller service account
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          kubectl get serviceaccount aws-load-balancer-controller \
+            -n kube-system
 
       - name: Install AWS Load Balancer Controller
+        env:
+          VPC_ID: ${{ secrets.VPC_ID }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           helm repo add eks https://aws.github.io/eks-charts
           helm repo update eks
 
-          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
-            -n kube-system \
-            --set clusterName=edf-cluster \
+          helm upgrade --install aws-load-balancer-controller \
+            eks/aws-load-balancer-controller \
+            --namespace kube-system \
+            --set clusterName="${EKS_CLUSTER_NAME}" \
             --set serviceAccount.create=false \
             --set serviceAccount.name=aws-load-balancer-controller \
-            --set region=ap-northeast-2 \
-            --set vpcId=${{ secrets.VPC_ID }}
-      
-      - name: Create EDF namespace
-        run: |
-          kubectl create namespace edf --dry-run=client -o yaml | kubectl apply -f -            
+            --set region="${AWS_REGION}" \
+            --set vpcId="${VPC_ID}" \
+            --wait \
+            --timeout 10m
+
+          kubectl rollout status deployment/aws-load-balancer-controller \
+            -n kube-system \
+            --timeout=5m
 
       - name: Install ArgoCD
+        shell: bash
         run: |
-          kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-          kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml --server-side --force-conflicts 
+          set -euo pipefail
 
-      - name: Create backend-secret
+          kubectl apply \
+            -n "${ARGOCD_NAMESPACE}" \
+            -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml \
+            --server-side \
+            --force-conflicts
+
+          kubectl wait \
+            --for=condition=Established \
+            crd/applications.argoproj.io \
+            crd/applicationsets.argoproj.io \
+            crd/appprojects.argoproj.io \
+            --timeout=3m
+
+          kubectl rollout status deployment/argocd-server \
+            -n "${ARGOCD_NAMESPACE}" \
+            --timeout=10m
+
+          kubectl rollout status deployment/argocd-repo-server \
+            -n "${ARGOCD_NAMESPACE}" \
+            --timeout=10m
+
+      - name: Create Backend Kubernetes Secret
         env:
           DB_URL: ${{ secrets.DB_URL }}
           DB_USERNAME: ${{ secrets.DB_USERNAME }}
@@ -77,8 +228,12 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_MAPS_ID: ${{ secrets.GOOGLE_MAPS_ID }}
           KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
+        shell: bash
         run: |
+          set -euo pipefail
+
           kubectl create secret generic backend-secret \
+            --namespace "${EDF_NAMESPACE}" \
             --from-literal=DB_URL="${DB_URL}" \
             --from-literal=DB_USERNAME="${DB_USERNAME}" \
             --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
@@ -94,50 +249,90 @@ jobs:
             --from-literal=GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
             --from-literal=GOOGLE_MAPS_ID="${GOOGLE_MAPS_ID}" \
             --from-literal=KAKAO_API_KEY="${KAKAO_API_KEY}" \
-            -n edf \
-            --dry-run=client -o yaml | kubectl apply -f -
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
 
-      - name: Create ai-secret
+      - name: Create AI Kubernetes Secret
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        shell: bash
         run: |
-          kubectl create secret generic ai-secret \
-            --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY}" \
-            -n edf \
-            --dry-run=client -o yaml | kubectl apply -f -
+          set -euo pipefail
 
-      - name: Create ArgoCD repo secret
+          kubectl create secret generic ai-secret \
+            --namespace "${EDF_NAMESPACE}" \
+            --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY}" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+      - name: Create ArgoCD repository Secret
         env:
           GITHUB_USERNAME: ${{ vars.USER_NAME }}
           GITOPS_REPO_URL: https://github.com/${{ vars.REPO }}.git
           GH_PAT: ${{ secrets.GH_PAT }}
+        shell: bash
         run: |
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: gitops-repo-secret
-            namespace: argocd
-            labels:
-              argocd.argoproj.io/secret-type: repository
-          stringData:
-            type: git
-            url: ${GITOPS_REPO_URL}
-            username: ${GITHUB_USERNAME}
-            password: ${GH_PAT}
-          EOF
+          set -euo pipefail
+
+          kubectl create secret generic gitops-repo-secret \
+            --namespace "${ARGOCD_NAMESPACE}" \
+            --from-literal=type=git \
+            --from-literal=url="${GITOPS_REPO_URL}" \
+            --from-literal=username="${GITHUB_USERNAME}" \
+            --from-literal=password="${GH_PAT}" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          kubectl label secret gitops-repo-secret \
+            -n "${ARGOCD_NAMESPACE}" \
+            argocd.argoproj.io/secret-type=repository \
+            --overwrite
 
       - name: Install monitoring stack
+        shell: bash
         run: |
-          kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+          set -euo pipefail
 
-          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add prometheus-community \
+            https://prometheus-community.github.io/helm-charts
           helm repo update prometheus-community
 
-          helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
-            -n monitoring \
-            -f k8s/monitoring/values.yml       
+          helm upgrade --install monitoring \
+            prometheus-community/kube-prometheus-stack \
+            --namespace "${MONITORING_NAMESPACE}" \
+            --values k8s/monitoring/values.yml \
+            --wait \
+            --timeout 15m
 
-      - name: Apply root-app
+      - name: Apply ArgoCD root application
+        shell: bash
         run: |
-          kubectl apply -f argocd/root-app.yml
+          set -euo pipefail
+
+          # 실제 파일명은 root-app.yaml이다.
+          kubectl apply -f argocd/root-app.yaml
+
+          kubectl get application root-app \
+            -n "${ARGOCD_NAMESPACE}" \
+            -o wide
+
+      - name: Show bootstrap result
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo '=== Namespaces ==='
+          kubectl get namespace \
+            "${EDF_NAMESPACE}" \
+            "${ARGOCD_NAMESPACE}" \
+            "${MONITORING_NAMESPACE}"
+
+          echo '=== Cluster add-ons ==='
+          kubectl get deployment \
+            -n kube-system \
+            metrics-server \
+            aws-load-balancer-controller
+
+          echo '=== ArgoCD applications ==='
+          kubectl get applications.argoproj.io \
+            -n "${ARGOCD_NAMESPACE}"
