@@ -19,6 +19,8 @@ spec:
         prometheus.io/path: "/actuator/prometheus"
         prometheus.io/port: "8080"
     spec:
+      # Terraform이 생성한 IRSA ServiceAccount
+      serviceAccountName: backend-service-account
       containers:
         - name: backend-container
           image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:latest
@@ -72,6 +74,23 @@ spec:
                 configMapKeyRef:
                   name: backend-config
                   key: AI_SERVICE_URL
+
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: AWS_REGION
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: S3_BUCKET_NAME
+            - name: S3_UPLOAD_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: S3_UPLOAD_PREFIX
+
             - name: SERVER_PORT
               valueFrom:
                 configMapKeyRef:

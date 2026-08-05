@@ -1,20 +1,30 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
+
 metadata:
-  name: edf-ingress
+  name: edf-api-ingress
   namespace: edf
+
   annotations:
-    alb.ingress.kubernetes.io/load-balancer-name: edf-dev-alb
+    alb.ingress.kubernetes.io/load-balancer-name: edf-dev-api-alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
-    alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:ap-northeast-2:398875891485:certificate/YOUR_CERT_ID
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
+
+    # 도메인 및 ACM 연결 전에는 HTTP만 사용한다.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+
+    # ALB가 Backend Pod의 상태를 확인한다.
+    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
+    alb.ingress.kubernetes.io/healthcheck-port: traffic-port
+    alb.ingress.kubernetes.io/healthcheck-path: /actuator/health
+    alb.ingress.kubernetes.io/success-codes: "200"
+
 spec:
   ingressClassName: alb
+
   rules:
-    - host: YOUR_DOMAIN
-      http:
+    # host를 지정하지 않으면 ALB 기본 DNS로 접근할 수 있다.
+    - http:
         paths:
           - path: /api
             pathType: Prefix
@@ -23,10 +33,20 @@ spec:
                 name: backend-service
                 port:
                   number: 80
-          - path: /
+
+          # 현재 Spring OAuth2 로그인을 계속 사용할 경우 필요한 경로
+          - path: /oauth2
             pathType: Prefix
             backend:
               service:
-                name: frontend-service
+                name: backend-service
+                port:
+                  number: 80
+
+          - path: /login/oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: backend-service
                 port:
                   number: 80
