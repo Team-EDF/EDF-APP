@@ -16,6 +16,8 @@ concurrency:
 env:
   AWS_REGION: ap-northeast-2
   EKS_CLUSTER_NAME: edf-cluster
+  AWS_LBC_CHART_VERSION: "3.3.0"
+
   EDF_NAMESPACE: edf
   ARGOCD_NAMESPACE: argocd
   MONITORING_NAMESPACE: monitoring
