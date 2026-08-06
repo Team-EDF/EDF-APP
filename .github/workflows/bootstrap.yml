@@ -168,7 +168,7 @@ jobs:
           kubectl apply -k \
             https://github.com/kubernetes/kube-state-metrics/examples/standard
 
-            - name: Verify AWS Load Balancer Controller service account
+      - name: Verify AWS Load Balancer Controller service account
         shell: bash
         run: |
           set -euo pipefail
