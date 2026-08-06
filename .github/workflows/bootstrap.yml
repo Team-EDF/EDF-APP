@@ -28,43 +28,44 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-
       - name: Validate required bootstrap values
         env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
           VPC_ID: ${{ secrets.VPC_ID }}
+
           DB_URL: ${{ secrets.DATABASE_URL }}
           DB_USERNAME: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASS }}
+
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+
           KAKAO_CLIENT_ID: ${{ secrets.KAKAO_CLIENT_ID }}
           KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}  
+
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
+
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
+          GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_USERNAME: ${{ vars.USER_NAME }}
           GITOPS_REPOSITORY: ${{ vars.REPO }}
+
         shell: bash
         run: |
           set -euo pipefail
 
           required_names=(
+            AWS_ROLE_ARN
             VPC_ID
             DB_URL
             DB_USERNAME
@@ -79,7 +80,6 @@ jobs:
             KAKAO_CLIENT_ID
             KAKAO_CLIENT_SECRET
             GOOGLE_API_KEY
-            GOOGLE_MAPS_ID
             KAKAO_API_KEY
             OPENAI_API_KEY
             GH_PAT
@@ -93,6 +93,18 @@ jobs:
               exit 1
             fi
           done
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
 
       - name: Update EKS kubeconfig
         shell: bash
@@ -161,6 +173,7 @@ jobs:
       - name: Install AWS Load Balancer Controller
         env:
           VPC_ID: ${{ secrets.VPC_ID }}
+
         shell: bash
         run: |
           set -euo pipefail
@@ -211,21 +224,27 @@ jobs:
 
       - name: Create Backend Kubernetes Secret
         env:
-          DB_URL: ${{ secrets.DB_URL }}
-          DB_USERNAME: ${{ secrets.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_URL: ${{ secrets.DATABASE_URL }}
+          DB_USERNAME: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASS }}
+
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
+
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+
           KAKAO_CLIENT_ID: ${{ secrets.KAKAO_CLIENT_ID }}
           KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          GOOGLE_MAPS_ID: ${{ secrets.GOOGLE_MAPS_ID }}
           KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
+
         shell: bash
         run: |
           set -euo pipefail
@@ -245,7 +264,6 @@ jobs:
             --from-literal=KAKAO_CLIENT_ID="${KAKAO_CLIENT_ID}" \
             --from-literal=KAKAO_CLIENT_SECRET="${KAKAO_CLIENT_SECRET}" \
             --from-literal=GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
-            --from-literal=GOOGLE_MAPS_ID="${GOOGLE_MAPS_ID}" \
             --from-literal=KAKAO_API_KEY="${KAKAO_API_KEY}" \
             --dry-run=client \
             -o yaml | kubectl apply -f -
@@ -253,6 +271,7 @@ jobs:
       - name: Create AI Kubernetes Secret
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+
         shell: bash
         run: |
           set -euo pipefail
@@ -268,6 +287,7 @@ jobs:
           GITHUB_USERNAME: ${{ vars.USER_NAME }}
           GITOPS_REPO_URL: https://github.com/${{ vars.REPO }}.git
           GH_PAT: ${{ secrets.GH_PAT }}
+
         shell: bash
         run: |
           set -euo pipefail
@@ -307,7 +327,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 실제 파일명은 root-app.yaml이다.
           kubectl apply -f argocd/root-app.yaml
 
           kubectl get application root-app \
