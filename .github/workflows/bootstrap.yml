@@ -2,6 +2,12 @@ name: Bootstrap EDF Platform
 
 on:
   workflow_dispatch:
+    inputs:
+      repair_lbc_webhook:
+        description: "AWS Load Balancer Controller Webhook 인증서 복구"
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: edf-platform-bootstrap
@@ -162,13 +168,39 @@ jobs:
           kubectl apply -k \
             https://github.com/kubernetes/kube-state-metrics/examples/standard
 
-      - name: Verify AWS Load Balancer Controller service account
+            - name: Verify AWS Load Balancer Controller service account
         shell: bash
         run: |
           set -euo pipefail
 
-          kubectl get serviceaccount aws-load-balancer-controller \
+          kubectl get serviceaccount \
+            aws-load-balancer-controller \
             -n kube-system
+
+      # 현재처럼 TLS Secret과 Webhook caBundle이 어긋난 경우에만 실행한다.
+      # 정상 배포에서는 repair_lbc_webhook=false로 둔다.
+      - name: Repair AWS Load Balancer Controller webhook
+        if: ${{ inputs.repair_lbc_webhook == true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Removing inconsistent webhook certificate resources..."
+
+          kubectl delete mutatingwebhookconfiguration \
+            aws-load-balancer-webhook \
+            --ignore-not-found=true
+
+          kubectl delete validatingwebhookconfiguration \
+            aws-load-balancer-webhook \
+            --ignore-not-found=true
+
+          kubectl delete secret \
+            aws-load-balancer-tls \
+            -n kube-system \
+            --ignore-not-found=true
+
+          echo "Webhook repair cleanup completed."
 
       - name: Install AWS Load Balancer Controller
         env:
@@ -178,23 +210,105 @@ jobs:
         run: |
           set -euo pipefail
 
-          helm repo add eks https://aws.github.io/eks-charts
+          helm repo add eks \
+            https://aws.github.io/eks-charts \
+            --force-update
+
           helm repo update eks
+
+          # Helm upgrade만으로 CRD가 항상 갱신되지는 않으므로
+          # Controller 설치 전에 명시적으로 적용한다.
+          kubectl apply -k \
+            "github.com/aws/eks-charts/stable/aws-load-balancer-controller/crds?ref=master"
+
+          KEEP_TLS_SECRET=true
+
+          if [[ "${{ inputs.repair_lbc_webhook }}" == "true" ]]; then
+            # 삭제한 인증서를 이번 설치에서 새로 생성한다.
+            KEEP_TLS_SECRET=false
+          fi
 
           helm upgrade --install aws-load-balancer-controller \
             eks/aws-load-balancer-controller \
             --namespace kube-system \
+            --version "${AWS_LBC_CHART_VERSION}" \
             --set clusterName="${EKS_CLUSTER_NAME}" \
             --set serviceAccount.create=false \
             --set serviceAccount.name=aws-load-balancer-controller \
             --set region="${AWS_REGION}" \
             --set vpcId="${VPC_ID}" \
+            --set keepTLSSecret="${KEEP_TLS_SECRET}" \
+            --atomic \
             --wait \
             --timeout 10m
 
-          kubectl rollout status deployment/aws-load-balancer-controller \
+          kubectl rollout status \
+            deployment/aws-load-balancer-controller \
             -n kube-system \
             --timeout=5m
+
+      - name: Verify AWS Load Balancer Controller webhook
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Controller Pods ==="
+
+          kubectl get pods \
+            -n kube-system \
+            -l app.kubernetes.io/name=aws-load-balancer-controller \
+            -o wide
+
+          echo "=== Webhook Service ==="
+
+          kubectl get service \
+            aws-load-balancer-webhook-service \
+            -n kube-system
+
+          echo "=== Webhook Endpoints ==="
+
+          ENDPOINTS="$(
+            kubectl get endpoints \
+              aws-load-balancer-webhook-service \
+              -n kube-system \
+              -o jsonpath='{.subsets[*].addresses[*].ip}'
+          )"
+
+          if [[ -z "${ENDPOINTS}" ]]; then
+            echo "::error::AWS Load Balancer Controller webhook has no ready endpoints."
+            exit 1
+          fi
+
+          echo "Webhook endpoints: ${ENDPOINTS}"
+
+      - name: Test AWS Load Balancer Controller webhook
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TEST_NAMESPACE="aws-lbc-webhook-test"
+
+          cleanup() {
+            kubectl delete namespace \
+              "${TEST_NAMESPACE}" \
+              --ignore-not-found=true \
+              --wait=false || true
+          }
+
+          trap cleanup EXIT
+
+          kubectl create namespace "${TEST_NAMESPACE}" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          # Service 생성은 mservice.elbv2.k8s.aws Webhook을 실제 호출한다.
+          kubectl create service clusterip webhook-test-service \
+            --tcp=80:80 \
+            -n "${TEST_NAMESPACE}" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          echo "AWS Load Balancer Controller webhook test passed."
 
       - name: Install ArgoCD
         shell: bash
