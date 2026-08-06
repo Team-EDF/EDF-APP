@@ -1,18 +1,21 @@
-name: Deploy EDF App
+name: Deploy EDF Server
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'backend/**'
-      - 'frontend/**'
-      - 'ai/**'
-      - '.github/workflows/deploy.yml'
+    inputs:
+      backend_ref:
+        description: "EDF-BE에서 배포할 Branch 또는 Tag"
+        required: true
+        default: "main"
+        type: string
+      ai_ref:
+        description: "EDF-AI에서 배포할 Branch 또는 Tag"
+        required: true
+        default: "main"
+        type: string
 
 concurrency:
-  group: edf-app-deploy-main
+  group: edf-server-deploy
   cancel-in-progress: false
 
 env:
@@ -20,7 +23,7 @@ env:
   TARGET_BRANCH: main
 
 jobs:
-  build-and-push:
+  build-push-and-update-gitops:
     runs-on: ubuntu-latest
 
     permissions:
@@ -28,8 +31,6 @@ jobs:
       contents: write
 
     steps:
-      # 먼저 통합 저장소만 Checkout한다.
-      # GH_PAT에는 EDF-APP 쓰기 권한과 필요한 Submodule 저장소 읽기 권한이 필요하다.
       - name: Checkout EDF-APP
         uses: actions/checkout@v4
         with:
@@ -38,66 +39,73 @@ jobs:
           submodules: false
           token: ${{ secrets.GH_PAT }}
 
-      # Push 실행이면 변경된 서비스만 배포하고,
-      # workflow_dispatch 실행이면 세 서비스를 모두 배포한다.
-      - name: Detect changed services
-        if: github.event_name == 'push'
-        id: changes
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            backend:
-              - 'backend/**'
-            frontend:
-              - 'frontend/**'
-            ai:
-              - 'ai/**'
-
-      - name: Set build targets
-        id: targets
+      - name: Validate required values
+        env:
+          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GIT_USER_NAME: ${{ vars.USER_NAME }}
+          GIT_USER_EMAIL: ${{ vars.USER_EMAIL }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            BUILD_BACKEND=true
-            BUILD_FRONTEND=true
-            BUILD_AI=true
-          else
-            BUILD_BACKEND="${{ steps.changes.outputs.backend || 'false' }}"
-            BUILD_FRONTEND="${{ steps.changes.outputs.frontend || 'false' }}"
-            BUILD_AI="${{ steps.changes.outputs.ai || 'false' }}"
-          fi
+          required_names=(
+            AWS_ROLE_ARN
+            GH_PAT
+            GIT_USER_NAME
+            GIT_USER_EMAIL
+          )
 
-          if [[ "${BUILD_BACKEND}" == "true" || \
-                "${BUILD_FRONTEND}" == "true" || \
-                "${BUILD_AI}" == "true" ]]; then
-            SHOULD_DEPLOY=true
-          else
-            SHOULD_DEPLOY=false
-          fi
+          for name in "${required_names[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Required GitHub Secret or Variable is missing: ${name}"
+              exit 1
+            fi
+          done
 
-          {
-            echo "build_backend=${BUILD_BACKEND}"
-            echo "build_frontend=${BUILD_FRONTEND}"
-            echo "build_ai=${BUILD_AI}"
-            echo "should_deploy=${SHOULD_DEPLOY}"
-          } >> "${GITHUB_OUTPUT}"
+      - name: Validate server submodule registration
+        shell: bash
+        run: |
+          set -euo pipefail
 
-          echo "Backend build: ${BUILD_BACKEND}"
-          echo "Frontend build: ${BUILD_FRONTEND}"
-          echo "AI build: ${BUILD_AI}"
-          echo "Should deploy: ${SHOULD_DEPLOY}"
+          test -f .gitmodules || {
+            echo "::error::.gitmodules file does not exist."
+            exit 1
+          }
 
-      # .gitmodules가 git@github.com 형식이므로
-      # Runner 안에서만 HTTPS와 PAT 방식으로 치환한다.
-      - name: Checkout required Git submodules
-        if: steps.targets.outputs.should_deploy == 'true'
+          REGISTERED_PATHS="$(
+            git config \
+              --file .gitmodules \
+              --get-regexp '\.path$' |
+            awk '{print $2}'
+          )"
+
+          echo "Registered submodule paths:"
+          echo "${REGISTERED_PATHS}"
+
+          for path in backend/EDF-BE ai/EDF-AI; do
+            if ! grep -Fxq "${path}" <<< "${REGISTERED_PATHS}"; then
+              echo "::error::Submodule path is not registered in EDF-APP: ${path}"
+              exit 1
+            fi
+          done
+
+      - name: Checkout latest Backend and AI sources
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
+          BACKEND_REF: ${{ inputs.backend_ref }}
+          AI_REF: ${{ inputs.ai_ref }}
         shell: bash
         run: |
           set -euo pipefail
+
+          cleanup_git_auth() {
+            git config --global --unset-all \
+              url."https://x-access-token:${GH_PAT}@github.com/".insteadOf \
+              || true
+          }
+
+          trap cleanup_git_auth EXIT
 
           git config --global \
             url."https://x-access-token:${GH_PAT}@github.com/".insteadOf \
@@ -105,106 +113,102 @@ jobs:
 
           git submodule sync --recursive
 
-          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
-            git submodule update \
-              --init \
-              --recursive \
-              --depth 1 \
-              backend/EDF-BE
-          fi
+          git submodule update \
+            --init \
+            --recursive \
+            backend/EDF-BE \
+            ai/EDF-AI
 
-          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
-            git submodule update \
-              --init \
-              --recursive \
-              --depth 1 \
-              frontend/EDF-FE
-          fi
+          git -C backend/EDF-BE fetch \
+            --depth 1 \
+            origin "${BACKEND_REF}"
 
-          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
-            git submodule update \
-              --init \
-              --recursive \
-              --depth 1 \
-              ai/EDF-AI
-          fi
+          git -C backend/EDF-BE checkout \
+            --detach FETCH_HEAD
 
-          git config --global --unset-all \
-            url."https://x-access-token:${GH_PAT}@github.com/".insteadOf || true
+          git -C ai/EDF-AI fetch \
+            --depth 1 \
+            origin "${AI_REF}"
 
-      # 소스가 실제로 내려왔는지 Docker Build 전에 확인한다.
+          git -C ai/EDF-AI checkout \
+            --detach FETCH_HEAD
+
+          BACKEND_COMMIT="$(
+            git -C backend/EDF-BE rev-parse HEAD
+          )"
+
+          AI_COMMIT="$(
+            git -C ai/EDF-AI rev-parse HEAD
+          )"
+
+          BACKEND_IMAGE_TAG="${BACKEND_COMMIT:0:7}"
+          AI_IMAGE_TAG="${AI_COMMIT:0:7}"
+
+          {
+            echo "BACKEND_COMMIT=${BACKEND_COMMIT}"
+            echo "AI_COMMIT=${AI_COMMIT}"
+            echo "BACKEND_IMAGE_TAG=${BACKEND_IMAGE_TAG}"
+            echo "AI_IMAGE_TAG=${AI_IMAGE_TAG}"
+          } >> "${GITHUB_ENV}"
+
+          echo "Backend source: ${BACKEND_COMMIT}"
+          echo "AI source: ${AI_COMMIT}"
+
       - name: Validate checked-out source files
-        if: steps.targets.outputs.should_deploy == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
           git submodule status --recursive
 
-          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
-            test -f backend/EDF-BE/build.gradle || {
-              echo "::error::backend/EDF-BE/build.gradle not found. Check the Backend submodule and GH_PAT permission."
-              exit 1
-            }
-
-            test -f backend/EDF-BE/settings.gradle || {
-              echo "::error::backend/EDF-BE/settings.gradle not found."
-              exit 1
-            }
-
-            test -d backend/EDF-BE/src || {
-              echo "::error::backend/EDF-BE/src directory not found."
-              exit 1
-            }
+          if [[ ! -f backend/EDF-BE/build.gradle && \
+                ! -f backend/EDF-BE/build.gradle.kts ]]; then
+            echo "::error::Backend build.gradle or build.gradle.kts not found."
+            exit 1
           fi
 
-          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
-            test -f frontend/EDF-FE/package.json || {
-              echo "::error::frontend/EDF-FE/package.json not found. Check the Frontend submodule and GH_PAT permission."
-              exit 1
-            }
+          test -d backend/EDF-BE/src || {
+            echo "::error::backend/EDF-BE/src directory not found."
+            exit 1
+          }
 
-            test -f frontend/nginx.conf || {
-              echo "::error::frontend/nginx.conf not found."
-              exit 1
-            }
-          fi
+          test -f ai/EDF-AI/requirements.txt || {
+            echo "::error::ai/EDF-AI/requirements.txt not found."
+            exit 1
+          }
 
-          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
-            test -f ai/EDF-AI/requirements.txt || {
-              echo "::error::ai/EDF-AI/requirements.txt not found. Check the AI submodule and GH_PAT permission."
-              exit 1
-            }
+          test -f ai/EDF-AI/main.py || {
+            echo "::error::ai/EDF-AI/main.py not found."
+            exit 1
+          }
 
-            test -f ai/EDF-AI/main.py || {
-              echo "::error::ai/EDF-AI/main.py not found."
-              exit 1
-            }
-          fi
+          test -f backend/Dockerfile || {
+            echo "::error::backend/Dockerfile not found."
+            exit 1
+          }
 
-      - name: Create image tag
-        if: steps.targets.outputs.should_deploy == 'true'
-        id: image-tag
-        shell: bash
-        run: |
-          set -euo pipefail
+          test -f ai/Dockerfile || {
+            echo "::error::ai/Dockerfile not found."
+            exit 1
+          }
 
-          IMAGE_TAG="${GITHUB_SHA::7}"
+          test -f k8s/backend/deployment.yml || {
+            echo "::error::k8s/backend/deployment.yml not found."
+            exit 1
+          }
 
-          echo "image_tag=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
-          echo "IMAGE_TAG=${IMAGE_TAG}" >> "${GITHUB_ENV}"
+          test -f k8s/ai/deployment.yml || {
+            echo "::error::k8s/ai/deployment.yml not found."
+            exit 1
+          }
 
       - name: Configure AWS credentials
-        if: steps.targets.outputs.should_deploy == 'true'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ECR Registry 주소는 AWS 계정 ID로 자동 생성한다.
-      # Repository Variable ECR_REGISTRY에 대한 의존성을 제거한다.
-      - name: Resolve ECR registry
-        if: steps.targets.outputs.should_deploy == 'true'
+      - name: Resolve and validate ECR
         shell: bash
         run: |
           set -euo pipefail
@@ -218,41 +222,19 @@ jobs:
           ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
           echo "ECR_REGISTRY=${ECR_REGISTRY}" >> "${GITHUB_ENV}"
-          echo "ECR Registry: ${ECR_REGISTRY}"
 
-      # Terraform이 ECR Repository를 실제로 만들었는지 확인한다.
-      - name: Validate ECR repositories
-        if: steps.targets.outputs.should_deploy == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
+          aws ecr describe-repositories \
+            --repository-names edf-backend \
+            > /dev/null
 
-          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
-            aws ecr describe-repositories \
-              --repository-names edf-backend \
-              > /dev/null
-          fi
-
-          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
-            aws ecr describe-repositories \
-              --repository-names edf-frontend \
-              > /dev/null
-          fi
-
-          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
-            aws ecr describe-repositories \
-              --repository-names edf-ai \
-              > /dev/null
-          fi
+          aws ecr describe-repositories \
+            --repository-names edf-ai \
+            > /dev/null
 
       - name: Login to Amazon ECR
-        if: steps.targets.outputs.should_deploy == 'true'
         uses: aws-actions/amazon-ecr-login@v2
 
-      # Dockerfile은 통합 저장소에 있고 실제 소스는 Submodule에 있으므로
-      # Runner 임시 디렉터리에 Build Context를 조립한다.
       - name: Prepare Docker build contexts
-        if: steps.targets.outputs.should_deploy == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -260,46 +242,28 @@ jobs:
           CONTEXT_ROOT="${RUNNER_TEMP}/edf-build-contexts"
 
           rm -rf "${CONTEXT_ROOT}"
-          mkdir -p "${CONTEXT_ROOT}"
+          mkdir -p \
+            "${CONTEXT_ROOT}/backend" \
+            "${CONTEXT_ROOT}/ai"
 
-          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
-            mkdir -p "${CONTEXT_ROOT}/backend"
+          rsync -a \
+            --delete \
+            --exclude='.git' \
+            backend/EDF-BE/ \
+            "${CONTEXT_ROOT}/backend/"
 
-            rsync -a \
-              --delete \
-              --exclude='.git' \
-              backend/EDF-BE/ \
-              "${CONTEXT_ROOT}/backend/"
+          rsync -a \
+            --delete \
+            --exclude='.git' \
+            ai/EDF-AI/ \
+            "${CONTEXT_ROOT}/ai/"
 
+          if [[ -f backend/.dockerignore ]]; then
             cp backend/.dockerignore \
               "${CONTEXT_ROOT}/backend/.dockerignore"
           fi
 
-          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
-            mkdir -p "${CONTEXT_ROOT}/frontend"
-
-            rsync -a \
-              --delete \
-              --exclude='.git' \
-              frontend/EDF-FE/ \
-              "${CONTEXT_ROOT}/frontend/"
-
-            cp frontend/nginx.conf \
-              "${CONTEXT_ROOT}/frontend/nginx.conf"
-
-            cp frontend/.dockerignore \
-              "${CONTEXT_ROOT}/frontend/.dockerignore"
-          fi
-
-          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
-            mkdir -p "${CONTEXT_ROOT}/ai"
-
-            rsync -a \
-              --delete \
-              --exclude='.git' \
-              ai/EDF-AI/ \
-              "${CONTEXT_ROOT}/ai/"
-
+          if [[ -f ai/.dockerignore ]]; then
             cp ai/.dockerignore \
               "${CONTEXT_ROOT}/ai/.dockerignore"
           fi
@@ -307,55 +271,40 @@ jobs:
           echo "CONTEXT_ROOT=${CONTEXT_ROOT}" >> "${GITHUB_ENV}"
 
       - name: Build and push Backend image
-        if: steps.targets.outputs.build_backend == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          FULL_IMAGE="${ECR_REGISTRY}/edf-backend:${IMAGE_TAG}"
+          BACKEND_IMAGE="${ECR_REGISTRY}/edf-backend:${BACKEND_IMAGE_TAG}"
 
           docker build \
             --pull \
             --file backend/Dockerfile \
-            --tag "${FULL_IMAGE}" \
+            --tag "${BACKEND_IMAGE}" \
             "${CONTEXT_ROOT}/backend"
 
-          docker push "${FULL_IMAGE}"
+          docker push "${BACKEND_IMAGE}"
 
-      - name: Build and push Frontend image
-        if: steps.targets.outputs.build_frontend == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          FULL_IMAGE="${ECR_REGISTRY}/edf-frontend:${IMAGE_TAG}"
-
-          docker build \
-            --pull \
-            --file frontend/Dockerfile \
-            --tag "${FULL_IMAGE}" \
-            "${CONTEXT_ROOT}/frontend"
-
-          docker push "${FULL_IMAGE}"
+          echo "BACKEND_IMAGE=${BACKEND_IMAGE}" >> "${GITHUB_ENV}"
 
       - name: Build and push AI image
-        if: steps.targets.outputs.build_ai == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          FULL_IMAGE="${ECR_REGISTRY}/edf-ai:${IMAGE_TAG}"
+          AI_IMAGE="${ECR_REGISTRY}/edf-ai:${AI_IMAGE_TAG}"
 
           docker build \
             --pull \
             --file ai/Dockerfile \
-            --tag "${FULL_IMAGE}" \
+            --tag "${AI_IMAGE}" \
             "${CONTEXT_ROOT}/ai"
 
-          docker push "${FULL_IMAGE}"
+          docker push "${AI_IMAGE}"
+
+          echo "AI_IMAGE=${AI_IMAGE}" >> "${GITHUB_ENV}"
 
       - name: Install yq
-        if: steps.targets.outputs.should_deploy == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -366,47 +315,30 @@ jobs:
             https://github.com/mikefarah/yq/releases/download/v4.44.2/yq_linux_amd64
 
           sudo chmod +x /usr/local/bin/yq
-
           yq --version
 
       - name: Update Kubernetes image tags
-        if: steps.targets.outputs.should_deploy == 'true'
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
-            FULL_IMAGE="${ECR_REGISTRY}/edf-backend:${IMAGE_TAG}" \
-              yq -i '
-                (
-                  .spec.template.spec.containers[]
-                  | select(.name == "backend-container").image
-                ) = strenv(FULL_IMAGE)
-              ' k8s/backend/deployment.yml
-          fi
+          BACKEND_IMAGE="${BACKEND_IMAGE}" \
+            yq -i '
+              (
+                .spec.template.spec.containers[]
+                | select(.name == "backend-container").image
+              ) = strenv(BACKEND_IMAGE)
+            ' k8s/backend/deployment.yml
 
-          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
-            FULL_IMAGE="${ECR_REGISTRY}/edf-frontend:${IMAGE_TAG}" \
-              yq -i '
-                (
-                  .spec.template.spec.containers[]
-                  | select(.name == "frontend-container").image
-                ) = strenv(FULL_IMAGE)
-              ' k8s/frontend/deployment.yml
-          fi
+          AI_IMAGE="${AI_IMAGE}" \
+            yq -i '
+              (
+                .spec.template.spec.containers[]
+                | select(.name == "ai-container").image
+              ) = strenv(AI_IMAGE)
+            ' k8s/ai/deployment.yml
 
-          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
-            FULL_IMAGE="${ECR_REGISTRY}/edf-ai:${IMAGE_TAG}" \
-              yq -i '
-                (
-                  .spec.template.spec.containers[]
-                  | select(.name == "ai-container").image
-                ) = strenv(FULL_IMAGE)
-              ' k8s/ai/deployment.yml
-          fi
-
-      - name: Commit and push manifest changes
-        if: steps.targets.outputs.should_deploy == 'true'
+      - name: Commit GitOps state
         shell: bash
         run: |
           set -euo pipefail
@@ -415,23 +347,36 @@ jobs:
           git config user.email "${{ vars.USER_EMAIL }}"
 
           git add \
+            backend/EDF-BE \
+            ai/EDF-AI \
             k8s/backend/deployment.yml \
-            k8s/frontend/deployment.yml \
             k8s/ai/deployment.yml
 
           if git diff --cached --quiet; then
-            echo "No Kubernetes manifest changes to commit."
+            echo "No GitOps state changes to commit."
             exit 0
           fi
 
           git commit \
-            -m "chore(deploy): update image tags to ${IMAGE_TAG} [skip ci]"
+            -m "chore(deploy): backend ${BACKEND_IMAGE_TAG}, ai ${AI_IMAGE_TAG} [skip ci]"
 
-          git pull --rebase origin "${TARGET_BRANCH}"
+          git pull \
+            --rebase \
+            origin "${TARGET_BRANCH}"
 
-          git push origin "HEAD:${TARGET_BRANCH}"
+          git push \
+            origin \
+            "HEAD:${TARGET_BRANCH}"
 
-      - name: Skip deployment
-        if: steps.targets.outputs.should_deploy != 'true'
+      - name: Deployment summary
+        shell: bash
         run: |
-          echo "No Backend, Frontend, or AI source change was detected."
+          {
+            echo "## EDF Server Deployment"
+            echo ""
+            echo "- Backend source: \`${BACKEND_COMMIT}\`"
+            echo "- Backend image: \`${BACKEND_IMAGE}\`"
+            echo "- AI source: \`${AI_COMMIT}\`"
+            echo "- AI image: \`${AI_IMAGE}\`"
+            echo "- ArgoCD target branch: \`${TARGET_BRANCH}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
