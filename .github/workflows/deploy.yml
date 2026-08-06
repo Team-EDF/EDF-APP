@@ -1,15 +1,23 @@
-name: deploy edf app
+name: Deploy EDF App
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+    paths:
+      - 'backend/**'
+      - 'frontend/**'
+      - 'ai/**'
+      - '.github/workflows/deploy.yml'
+
+concurrency:
+  group: edf-app-deploy-main
+  cancel-in-progress: false
 
 env:
   AWS_REGION: ap-northeast-2
-  ECR_REGISTRY: ${{ vars.ECR_REGISTRY }}
-  BRANCH: ${{ vars.BRANCH }}
+  TARGET_BRANCH: main
 
 jobs:
   build-and-push:
@@ -20,25 +28,18 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout GitHub
+      # 먼저 통합 저장소만 Checkout한다.
+      # GH_PAT에는 EDF-APP 쓰기 권한과 필요한 Submodule 저장소 읽기 권한이 필요하다.
+      - name: Checkout EDF-APP
         uses: actions/checkout@v4
-
-      - name: Create IMAGE_TAG with GITHUB_SHA
-        id: image_tag
-        run: |
-          IMAGE_TAG=${GITHUB_SHA::7}
-          echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
-          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          submodules: false
+          token: ${{ secrets.GH_PAT }}
 
-      - name: Login to ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
+      # Push 실행이면 변경된 서비스만 배포하고,
+      # workflow_dispatch 실행이면 세 서비스를 모두 배포한다.
       - name: Detect changed services
         if: github.event_name == 'push'
         id: changes
@@ -52,107 +53,385 @@ jobs:
             ai:
               - 'ai/**'
 
-      - name: Stop if no service changed
-        if: |
-          github.event_name == 'push' &&
-          steps.changes.outputs.backend != 'true' &&
-          steps.changes.outputs.frontend != 'true' &&
-          steps.changes.outputs.ai != 'true'
+      - name: Set build targets
+        id: targets
+        shell: bash
         run: |
-          echo "No service directory changed. Skip build & deploy."
-          exit 0
+          set -euo pipefail
+
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            BUILD_BACKEND=true
+            BUILD_FRONTEND=true
+            BUILD_AI=true
+          else
+            BUILD_BACKEND="${{ steps.changes.outputs.backend || 'false' }}"
+            BUILD_FRONTEND="${{ steps.changes.outputs.frontend || 'false' }}"
+            BUILD_AI="${{ steps.changes.outputs.ai || 'false' }}"
+          fi
+
+          if [[ "${BUILD_BACKEND}" == "true" || \
+                "${BUILD_FRONTEND}" == "true" || \
+                "${BUILD_AI}" == "true" ]]; then
+            SHOULD_DEPLOY=true
+          else
+            SHOULD_DEPLOY=false
+          fi
+
+          {
+            echo "build_backend=${BUILD_BACKEND}"
+            echo "build_frontend=${BUILD_FRONTEND}"
+            echo "build_ai=${BUILD_AI}"
+            echo "should_deploy=${SHOULD_DEPLOY}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Backend build: ${BUILD_BACKEND}"
+          echo "Frontend build: ${BUILD_FRONTEND}"
+          echo "AI build: ${BUILD_AI}"
+          echo "Should deploy: ${SHOULD_DEPLOY}"
+
+      # .gitmodules가 git@github.com 형식이므로
+      # Runner 안에서만 HTTPS와 PAT 방식으로 치환한다.
+      - name: Checkout required Git submodules
+        if: steps.targets.outputs.should_deploy == 'true'
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config --global \
+            url."https://x-access-token:${GH_PAT}@github.com/".insteadOf \
+            "git@github.com:"
+
+          git submodule sync --recursive
+
+          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
+            git submodule update \
+              --init \
+              --recursive \
+              --depth 1 \
+              backend/EDF-BE
+          fi
+
+          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
+            git submodule update \
+              --init \
+              --recursive \
+              --depth 1 \
+              frontend/EDF-FE
+          fi
+
+          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
+            git submodule update \
+              --init \
+              --recursive \
+              --depth 1 \
+              ai/EDF-AI
+          fi
+
+          git config --global --unset-all \
+            url."https://x-access-token:${GH_PAT}@github.com/".insteadOf || true
+
+      # 소스가 실제로 내려왔는지 Docker Build 전에 확인한다.
+      - name: Validate checked-out source files
+        if: steps.targets.outputs.should_deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git submodule status --recursive
+
+          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
+            test -f backend/EDF-BE/build.gradle || {
+              echo "::error::backend/EDF-BE/build.gradle not found. Check the Backend submodule and GH_PAT permission."
+              exit 1
+            }
+
+            test -f backend/EDF-BE/settings.gradle || {
+              echo "::error::backend/EDF-BE/settings.gradle not found."
+              exit 1
+            }
+
+            test -d backend/EDF-BE/src || {
+              echo "::error::backend/EDF-BE/src directory not found."
+              exit 1
+            }
+          fi
+
+          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
+            test -f frontend/EDF-FE/package.json || {
+              echo "::error::frontend/EDF-FE/package.json not found. Check the Frontend submodule and GH_PAT permission."
+              exit 1
+            }
+
+            test -f frontend/nginx.conf || {
+              echo "::error::frontend/nginx.conf not found."
+              exit 1
+            }
+          fi
+
+          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
+            test -f ai/EDF-AI/requirements.txt || {
+              echo "::error::ai/EDF-AI/requirements.txt not found. Check the AI submodule and GH_PAT permission."
+              exit 1
+            }
+
+            test -f ai/EDF-AI/main.py || {
+              echo "::error::ai/EDF-AI/main.py not found."
+              exit 1
+            }
+          fi
+
+      - name: Create image tag
+        if: steps.targets.outputs.should_deploy == 'true'
+        id: image-tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE_TAG="${GITHUB_SHA::7}"
+
+          echo "image_tag=${IMAGE_TAG}" >> "${GITHUB_OUTPUT}"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "${GITHUB_ENV}"
+
+      - name: Configure AWS credentials
+        if: steps.targets.outputs.should_deploy == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ECR Registry 주소는 AWS 계정 ID로 자동 생성한다.
+      # Repository Variable ECR_REGISTRY에 대한 의존성을 제거한다.
+      - name: Resolve ECR registry
+        if: steps.targets.outputs.should_deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          AWS_ACCOUNT_ID="$(
+            aws sts get-caller-identity \
+              --query Account \
+              --output text
+          )"
+
+          ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+
+          echo "ECR_REGISTRY=${ECR_REGISTRY}" >> "${GITHUB_ENV}"
+          echo "ECR Registry: ${ECR_REGISTRY}"
+
+      # Terraform이 ECR Repository를 실제로 만들었는지 확인한다.
+      - name: Validate ECR repositories
+        if: steps.targets.outputs.should_deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
+            aws ecr describe-repositories \
+              --repository-names edf-backend \
+              > /dev/null
+          fi
+
+          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
+            aws ecr describe-repositories \
+              --repository-names edf-frontend \
+              > /dev/null
+          fi
+
+          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
+            aws ecr describe-repositories \
+              --repository-names edf-ai \
+              > /dev/null
+          fi
+
+      - name: Login to Amazon ECR
+        if: steps.targets.outputs.should_deploy == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # Dockerfile은 통합 저장소에 있고 실제 소스는 Submodule에 있으므로
+      # Runner 임시 디렉터리에 Build Context를 조립한다.
+      - name: Prepare Docker build contexts
+        if: steps.targets.outputs.should_deploy == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONTEXT_ROOT="${RUNNER_TEMP}/edf-build-contexts"
+
+          rm -rf "${CONTEXT_ROOT}"
+          mkdir -p "${CONTEXT_ROOT}"
+
+          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
+            mkdir -p "${CONTEXT_ROOT}/backend"
+
+            rsync -a \
+              --delete \
+              --exclude='.git' \
+              backend/EDF-BE/ \
+              "${CONTEXT_ROOT}/backend/"
+
+            cp backend/.dockerignore \
+              "${CONTEXT_ROOT}/backend/.dockerignore"
+          fi
+
+          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
+            mkdir -p "${CONTEXT_ROOT}/frontend"
+
+            rsync -a \
+              --delete \
+              --exclude='.git' \
+              frontend/EDF-FE/ \
+              "${CONTEXT_ROOT}/frontend/"
+
+            cp frontend/nginx.conf \
+              "${CONTEXT_ROOT}/frontend/nginx.conf"
+
+            cp frontend/.dockerignore \
+              "${CONTEXT_ROOT}/frontend/.dockerignore"
+          fi
+
+          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
+            mkdir -p "${CONTEXT_ROOT}/ai"
+
+            rsync -a \
+              --delete \
+              --exclude='.git' \
+              ai/EDF-AI/ \
+              "${CONTEXT_ROOT}/ai/"
+
+            cp ai/.dockerignore \
+              "${CONTEXT_ROOT}/ai/.dockerignore"
+          fi
+
+          echo "CONTEXT_ROOT=${CONTEXT_ROOT}" >> "${GITHUB_ENV}"
+
+      - name: Build and push Backend image
+        if: steps.targets.outputs.build_backend == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FULL_IMAGE="${ECR_REGISTRY}/edf-backend:${IMAGE_TAG}"
+
+          docker build \
+            --pull \
+            --file backend/Dockerfile \
+            --tag "${FULL_IMAGE}" \
+            "${CONTEXT_ROOT}/backend"
+
+          docker push "${FULL_IMAGE}"
+
+      - name: Build and push Frontend image
+        if: steps.targets.outputs.build_frontend == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FULL_IMAGE="${ECR_REGISTRY}/edf-frontend:${IMAGE_TAG}"
+
+          docker build \
+            --pull \
+            --file frontend/Dockerfile \
+            --tag "${FULL_IMAGE}" \
+            "${CONTEXT_ROOT}/frontend"
+
+          docker push "${FULL_IMAGE}"
+
+      - name: Build and push AI image
+        if: steps.targets.outputs.build_ai == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FULL_IMAGE="${ECR_REGISTRY}/edf-ai:${IMAGE_TAG}"
+
+          docker build \
+            --pull \
+            --file ai/Dockerfile \
+            --tag "${FULL_IMAGE}" \
+            "${CONTEXT_ROOT}/ai"
+
+          docker push "${FULL_IMAGE}"
 
       - name: Install yq
+        if: steps.targets.outputs.should_deploy == 'true'
+        shell: bash
         run: |
-          sudo wget -O /usr/local/bin/yq \
+          set -euo pipefail
+
+          sudo wget \
+            --quiet \
+            --output-document=/usr/local/bin/yq \
             https://github.com/mikefarah/yq/releases/download/v4.44.2/yq_linux_amd64
+
           sudo chmod +x /usr/local/bin/yq
+
           yq --version
 
-      - name: Build and push backend image
-        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.backend == 'true'
-        env:
-          REPOSITORY: edf-backend
-          DOCKERFILE_PATH: ./backend/Dockerfile
-          BUILD_CONTEXT: ./backend
+      - name: Update Kubernetes image tags
+        if: steps.targets.outputs.should_deploy == 'true'
+        shell: bash
         run: |
-          docker build \
-            -t ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG} \
-            -f ${DOCKERFILE_PATH} ${BUILD_CONTEXT}
+          set -euo pipefail
 
-          docker push ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG}
+          if [[ "${{ steps.targets.outputs.build_backend }}" == "true" ]]; then
+            FULL_IMAGE="${ECR_REGISTRY}/edf-backend:${IMAGE_TAG}" \
+              yq -i '
+                (
+                  .spec.template.spec.containers[]
+                  | select(.name == "backend-container").image
+                ) = strenv(FULL_IMAGE)
+              ' k8s/backend/deployment.yml
+          fi
 
-      - name: Build and push frontend image
-        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.frontend == 'true'
-        env:
-          REPOSITORY: edf-frontend
-          DOCKERFILE_PATH: ./frontend/Dockerfile
-          BUILD_CONTEXT: ./frontend
+          if [[ "${{ steps.targets.outputs.build_frontend }}" == "true" ]]; then
+            FULL_IMAGE="${ECR_REGISTRY}/edf-frontend:${IMAGE_TAG}" \
+              yq -i '
+                (
+                  .spec.template.spec.containers[]
+                  | select(.name == "frontend-container").image
+                ) = strenv(FULL_IMAGE)
+              ' k8s/frontend/deployment.yml
+          fi
+
+          if [[ "${{ steps.targets.outputs.build_ai }}" == "true" ]]; then
+            FULL_IMAGE="${ECR_REGISTRY}/edf-ai:${IMAGE_TAG}" \
+              yq -i '
+                (
+                  .spec.template.spec.containers[]
+                  | select(.name == "ai-container").image
+                ) = strenv(FULL_IMAGE)
+              ' k8s/ai/deployment.yml
+          fi
+
+      - name: Commit and push manifest changes
+        if: steps.targets.outputs.should_deploy == 'true'
+        shell: bash
         run: |
-          docker build \
-            -t ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG} \
-            -f ${DOCKERFILE_PATH} ${BUILD_CONTEXT}
+          set -euo pipefail
 
-          docker push ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG}
-
-      - name: Build and push ai image
-        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.ai == 'true'
-        env:
-          REPOSITORY: edf-ai
-          DOCKERFILE_PATH: ./ai/Dockerfile
-          BUILD_CONTEXT: ./ai
-        run: |
-          docker build \
-            -t ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG} \
-            -f ${DOCKERFILE_PATH} ${BUILD_CONTEXT}
-
-          docker push ${ECR_REGISTRY}/${REPOSITORY}:${IMAGE_TAG}
-
-      - name: Update backend image tag
-        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.backend == 'true'
-        env:
-          FULL_IMAGE: ${{ vars.ECR_REGISTRY }}/edf-backend:${{ steps.image_tag.outputs.image_tag }}
-          FILE_PATH: ./k8s/backend/deployment.yml
-        run: |
-          yq -i '
-            (.spec.template.spec.containers[] | select(.name == "backend-container").image) = strenv(FULL_IMAGE)
-          ' "${FILE_PATH}"
-
-      - name: Update frontend image tag
-        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.frontend == 'true'
-        env:
-          FULL_IMAGE: ${{ vars.ECR_REGISTRY }}/edf-frontend:${{ steps.image_tag.outputs.image_tag }}
-          FILE_PATH: ./k8s/frontend/deployment.yml
-        run: |
-          yq -i '
-            (.spec.template.spec.containers[] | select(.name == "frontend-container").image) = strenv(FULL_IMAGE)
-          ' "${FILE_PATH}"
-
-      - name: Update ai image tag
-        if: github.event_name == 'workflow_dispatch' || steps.changes.outputs.ai == 'true'
-        env:
-          FULL_IMAGE: ${{ vars.ECR_REGISTRY }}/edf-ai:${{ steps.image_tag.outputs.image_tag }}
-          FILE_PATH: ./k8s/ai/deployment.yml
-        run: |
-          yq -i '
-            (.spec.template.spec.containers[] | select(.name == "ai-container").image) = strenv(FULL_IMAGE)
-          ' "${FILE_PATH}"
-
-      - name: Configure git identity
-        run: |
           git config user.name "${{ vars.USER_NAME }}"
           git config user.email "${{ vars.USER_EMAIL }}"
 
-      - name: Commit and push manifest changes
-        run: |
-          git add ./k8s/backend/deployment.yml \
-                  ./k8s/frontend/deployment.yml \
-                  ./k8s/ai/deployment.yml
+          git add \
+            k8s/backend/deployment.yml \
+            k8s/frontend/deployment.yml \
+            k8s/ai/deployment.yml
 
           if git diff --cached --quiet; then
-            echo "No manifest changes to commit."
+            echo "No Kubernetes manifest changes to commit."
             exit 0
           fi
 
-          git commit -m "chore: update image tags to ${IMAGE_TAG}"
-          git push origin "${BRANCH}"
+          git commit \
+            -m "chore(deploy): update image tags to ${IMAGE_TAG} [skip ci]"
+
+          git pull --rebase origin "${TARGET_BRANCH}"
+
+          git push origin "HEAD:${TARGET_BRANCH}"
+
+      - name: Skip deployment
+        if: steps.targets.outputs.should_deploy != 'true'
+        run: |
+          echo "No Backend, Frontend, or AI source change was detected."
