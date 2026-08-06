@@ -43,9 +43,9 @@ jobs:
       - name: Validate required bootstrap values
         env:
           VPC_ID: ${{ secrets.VPC_ID }}
-          DB_URL: ${{ secrets.DB_URL }}
-          DB_USERNAME: ${{ secrets.DB_USERNAME }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_URL: ${{ secrets.DATABASE_URL }}
+          DB_USERNAME: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASS }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
@@ -55,11 +55,9 @@ jobs:
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           KAKAO_CLIENT_ID: ${{ secrets.KAKAO_CLIENT_ID }}
           KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          GOOGLE_MAPS_ID: ${{ secrets.GOOGLE_MAPS_ID }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}  
           KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_USERNAME: ${{ vars.USER_NAME }}
           GITOPS_REPOSITORY: ${{ vars.REPO }}
         shell: bash
