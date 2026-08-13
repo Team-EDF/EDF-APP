@@ -2,7 +2,7 @@ version: '3.9'
 
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     container_name: edf-postgres
     restart: unless-stopped
     environment:
@@ -45,11 +45,19 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      DB_HOST: ${AI_DB_HOST}
+      DB_PORT: ${DB_PORT}
+      DB_NAME: edf
+      DB_USER: ${DB_USERNAME}
+      DB_PASS: ${DB_PASSWORD}
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+    volumes:
+      - ./credentials:/Users/kyujin/IdeaProjects/EDF/credentials:ro
     networks:
       - edf-network
 
@@ -75,21 +83,21 @@ services:
     networks:
       - edf-network
 
-  frontend:
-    build:
-      context: ./frontend/EDF-FE
-      dockerfile: ../Dockerfile
-    platform: linux/amd64
-    container_name: edf-frontend
-    restart: unless-stopped
-    env_file:
-      - .env
-    ports:
-      - "5173:5173"
-    depends_on:
-      - backend
-    networks:
-      - edf-network
+#  frontend:
+#    build:
+#      context: ./frontend/EDF-FE
+#      dockerfile: ../Dockerfile
+#    platform: linux/amd64
+#    container_name: edf-frontend
+#    restart: unless-stopped
+#    env_file:
+#      - .env
+#    ports:
+#      - "5173:5173"
+#    depends_on:
+#      - backend
+#    networks:
+#      - edf-network
 
 volumes:
   edf_postgres_data:
