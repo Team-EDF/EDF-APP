@@ -101,12 +101,12 @@ jobs:
 
     steps:
       - name: Checkout EDF-APP
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
-          submodules: false
-          token: ${{ secrets.GH_PAT }}
+          token: ${{ github.token }}
+          persist-credentials: true
 
       - name: Checkout EDF-BE
         uses: actions/checkout@v4
@@ -116,6 +116,7 @@ jobs:
           path: sources/backend
           fetch-depth: 1
           token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
 
       - name: Checkout EDF-AI
         uses: actions/checkout@v4
@@ -125,6 +126,7 @@ jobs:
           path: sources/ai
           fetch-depth: 1
           token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
 
       - name: Validate server deployment values
         env:
