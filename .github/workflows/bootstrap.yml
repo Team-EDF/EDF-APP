@@ -21,6 +21,7 @@ env:
   EDF_NAMESPACE: edf
   ARGOCD_NAMESPACE: argocd
   MONITORING_NAMESPACE: monitoring
+  EDF_INGRESS_NAME: edf-api-ingress
 
 jobs:
   bootstrap:
@@ -39,8 +40,6 @@ jobs:
       - name: Validate required bootstrap values
         env:
           AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-          VPC_ID: ${{ secrets.VPC_ID }}
-
           DB_URL: ${{ secrets.DATABASE_URL }}
           DB_USERNAME: ${{ secrets.DB_USER }}
           DB_PASSWORD: ${{ secrets.DB_PASS }}
@@ -74,7 +73,6 @@ jobs:
 
           required_names=(
             AWS_ROLE_ARN
-            VPC_ID
             DB_URL
             DB_USERNAME
             DB_PASSWORD
@@ -133,6 +131,44 @@ jobs:
 
           if [[ "$(kubectl auth can-i create namespace)" != "yes" ]]; then
             echo "::error::The GitHub Actions role does not have sufficient EKS permissions."
+            exit 1
+          fi
+
+      - name: Resolve EKS VPC and validate ALB subnets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VPC_ID="$(
+            aws eks describe-cluster \
+              --region "${AWS_REGION}" \
+              --name "${EKS_CLUSTER_NAME}" \
+              --query 'cluster.resourcesVpcConfig.vpcId' \
+              --output text
+          )"
+
+          if [[ -z "${VPC_ID}" || "${VPC_ID}" == "None" ]]; then
+            echo "::error::Could not resolve the VPC ID from EKS cluster ${EKS_CLUSTER_NAME}."
+            exit 1
+          fi
+
+          echo "Resolved EKS VPC: ${VPC_ID}"
+          echo "VPC_ID=${VPC_ID}" >> "${GITHUB_ENV}"
+
+          PUBLIC_SUBNET_COUNT="$(
+            aws ec2 describe-subnets \
+              --region "${AWS_REGION}" \
+              --filters \
+                "Name=vpc-id,Values=${VPC_ID}" \
+                "Name=tag:kubernetes.io/role/elb,Values=1" \
+              --query 'length(Subnets)' \
+              --output text
+          )"
+
+          echo "ALB-discoverable public subnets: ${PUBLIC_SUBNET_COUNT}"
+
+          if [[ "${PUBLIC_SUBNET_COUNT}" -lt 2 ]]; then
+            echo "::error::At least two public subnets tagged kubernetes.io/role/elb=1 are required for the internet-facing ALB. Found ${PUBLIC_SUBNET_COUNT} in ${VPC_ID}."
             exit 1
           fi
 
@@ -205,9 +241,6 @@ jobs:
           echo "Webhook repair cleanup completed."
 
       - name: Install AWS Load Balancer Controller
-        env:
-          VPC_ID: ${{ secrets.VPC_ID }}
-
         shell: bash
         run: |
           set -euo pipefail
@@ -338,6 +371,38 @@ jobs:
             -n "${ARGOCD_NAMESPACE}" \
             --timeout=10m
 
+      - name: Disable ArgoCD Git submodule checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # ArgoCD only consumes GitOps manifests from EDF-APP.
+          # BE/AI/FE private submodules are fetched by GitHub Actions when needed.
+          kubectl patch configmap argocd-cmd-params-cm \
+            -n "${ARGOCD_NAMESPACE}" \
+            --type merge \
+            -p '{"data":{"reposerver.enable.git.submodule":"false"}}'
+
+          kubectl rollout restart deployment/argocd-repo-server \
+            -n "${ARGOCD_NAMESPACE}"
+
+          kubectl rollout status deployment/argocd-repo-server \
+            -n "${ARGOCD_NAMESPACE}" \
+            --timeout=10m
+
+          SUBMODULE_SETTING="$(
+            kubectl get configmap argocd-cmd-params-cm \
+              -n "${ARGOCD_NAMESPACE}" \
+              -o jsonpath='{.data.reposerver\.enable\.git\.submodule}'
+          )"
+
+          if [[ "${SUBMODULE_SETTING}" != "false" ]]; then
+            echo "::error::Failed to disable ArgoCD Git submodule checkout."
+            exit 1
+          fi
+
+          echo "ArgoCD Git submodule checkout: ${SUBMODULE_SETTING}"
+
       - name: Create Backend Kubernetes Secret
         env:
           DB_URL: ${{ secrets.DATABASE_URL }}
@@ -449,6 +514,84 @@ jobs:
             -n "${ARGOCD_NAMESPACE}" \
             -o wide
 
+      - name: Verify ArgoCD sync and ALB provisioning
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Waiting for root-app to become Synced..."
+
+          ROOT_SYNCED=false
+          for attempt in $(seq 1 60); do
+            SYNC_STATUS="$(
+              kubectl get application root-app \
+                -n "${ARGOCD_NAMESPACE}" \
+                -o jsonpath='{.status.sync.status}' 2>/dev/null || true
+            )"
+
+            if [[ "${SYNC_STATUS}" == "Synced" ]]; then
+              ROOT_SYNCED=true
+              break
+            fi
+
+            sleep 5
+          done
+
+          if [[ "${ROOT_SYNCED}" != "true" ]]; then
+            echo "::error::root-app did not reach Synced status."
+            kubectl describe application root-app -n "${ARGOCD_NAMESPACE}" || true
+            exit 1
+          fi
+
+          echo "Waiting for Ingress ${EDF_NAMESPACE}/${EDF_INGRESS_NAME}..."
+
+          INGRESS_CREATED=false
+          for attempt in $(seq 1 60); do
+            if kubectl get ingress "${EDF_INGRESS_NAME}" \
+              -n "${EDF_NAMESPACE}" >/dev/null 2>&1; then
+              INGRESS_CREATED=true
+              break
+            fi
+
+            sleep 5
+          done
+
+          if [[ "${INGRESS_CREATED}" != "true" ]]; then
+            echo "::error::Ingress ${EDF_NAMESPACE}/${EDF_INGRESS_NAME} was not created."
+            kubectl get applications -n "${ARGOCD_NAMESPACE}" -o wide || true
+            exit 1
+          fi
+
+          echo "Waiting for ALB hostname..."
+
+          ALB_HOSTNAME=""
+          for attempt in $(seq 1 120); do
+            ALB_HOSTNAME="$(
+              kubectl get ingress "${EDF_INGRESS_NAME}" \
+                -n "${EDF_NAMESPACE}" \
+                -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true
+            )"
+
+            if [[ -n "${ALB_HOSTNAME}" ]]; then
+              break
+            fi
+
+            sleep 5
+          done
+
+          if [[ -z "${ALB_HOSTNAME}" ]]; then
+            echo "::error::ALB hostname was not assigned within 10 minutes."
+            kubectl describe ingress "${EDF_INGRESS_NAME}" -n "${EDF_NAMESPACE}" || true
+            kubectl logs \
+              -n kube-system \
+              deployment/aws-load-balancer-controller \
+              --since=15m || true
+            exit 1
+          fi
+
+          echo "ALB_HOSTNAME=${ALB_HOSTNAME}" >> "${GITHUB_ENV}"
+          echo "ALB hostname: ${ALB_HOSTNAME}"
+
       - name: Show bootstrap result
         shell: bash
         run: |
@@ -469,3 +612,12 @@ jobs:
           echo '=== ArgoCD applications ==='
           kubectl get applications.argoproj.io \
             -n "${ARGOCD_NAMESPACE}"
+
+          echo '=== Network ==='
+          echo "EKS VPC: ${VPC_ID}"
+          echo "ALB: ${ALB_HOSTNAME:-not-assigned}"
+
+          kubectl get ingress "${EDF_INGRESS_NAME}" \
+            -n "${EDF_NAMESPACE}" \
+            -o wide
+
