@@ -15,6 +15,9 @@ spec:
       labels:
         app: ai
     spec:
+      # Terraform이 생성한 AI 전용 S3 IRSA ServiceAccount
+      serviceAccountName: ai-service-account
+
       containers:
         - name: ai-container
           image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-ai:latest
@@ -42,6 +45,33 @@ spec:
                 configMapKeyRef:
                   name: ai-config
                   key: APP_ENV
+
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_NAME
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_PASSWORD
+
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
