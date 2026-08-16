@@ -20,7 +20,7 @@ spec:
 
       containers:
         - name: ai-container
-          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-ai:latest
+          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-ai:82f2b20
           imagePullPolicy: Always
           ports:
             - name: http
@@ -71,6 +71,12 @@ spec:
                 secretKeyRef:
                   name: ai-secret
                   key: DB_PASSWORD
+            # 현재 AI DB 코드 호환 alias.
+            # GitHub/Kubernetes Secret 이름은 DB_USERNAME/DB_PASSWORD로 유지한다.
+            - name: DB_USER
+              value: "$(DB_USERNAME)"
+            - name: DB_PASS
+              value: "$(DB_PASSWORD)"
 
             - name: OPENAI_API_KEY
               valueFrom:
