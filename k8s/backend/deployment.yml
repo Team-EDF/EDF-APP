@@ -23,12 +23,11 @@ spec:
       serviceAccountName: backend-service-account
       containers:
         - name: backend-container
-          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:latest
+          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:3b69b1a
           imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8080
-
           resources:
             requests:
               cpu: "250m"
@@ -36,7 +35,6 @@ spec:
             limits:
               cpu: "500m"
               memory: "512Mi"
-
           env:
             - name: DB_HOST
               valueFrom:
@@ -68,7 +66,6 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: JWT_SECRET
-
             - name: REDIS_HOST
               valueFrom:
                 configMapKeyRef:
@@ -84,7 +81,6 @@ spec:
                 configMapKeyRef:
                   name: backend-config
                   key: AI_SERVICE_URL
-
             - name: AWS_REGION
               valueFrom:
                 configMapKeyRef:
@@ -100,13 +96,11 @@ spec:
                 configMapKeyRef:
                   name: backend-config
                   key: S3_UPLOAD_PREFIX
-
             - name: SERVER_PORT
               valueFrom:
                 configMapKeyRef:
                   name: backend-config
                   key: SERVER_PORT
-            
             - name: MAIL_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -117,7 +111,6 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: MAIL_APP_PASSWORD
-
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -128,7 +121,6 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: GOOGLE_CLIENT_SECRET
-
             - name: NAVER_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -139,7 +131,6 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: NAVER_CLIENT_SECRET
-
             - name: KAKAO_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -150,7 +141,6 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: KAKAO_CLIENT_SECRET
-
             - name: GOOGLE_API_KEY
               valueFrom:
                 secretKeyRef:
@@ -161,7 +151,6 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: KAKAO_API_KEY
-
             - name: JWT_ACCESS_EXP
               valueFrom:
                 configMapKeyRef:
@@ -176,9 +165,7 @@ spec:
               valueFrom:
                 configMapKeyRef:
                   name: backend-config
-                  key: FILE_UPLOAD_DIR    
-
-
+                  key: FILE_UPLOAD_DIR
           readinessProbe:
             httpGet:
               path: /actuator/health
@@ -187,7 +174,6 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
-
           livenessProbe:
             httpGet:
               path: /actuator/health
