@@ -73,7 +73,6 @@ spec:
               value: "$(DB_USERNAME)"
             - name: DB_PASS
               value: "$(DB_PASSWORD)"
-
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
