@@ -61,6 +61,12 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: DB_PASSWORD
+            # 현재 Backend application.yml 호환:
+            # spring.datasource.url = ${DB_URL:jdbc:postgresql://localhost:5432/edf}
+            # Secret은 통일된 DB_HOST/DB_PORT/DB_NAME 구조를 유지하고
+            # Pod에서 DB_URL만 조합한다.
+            - name: DB_URL
+              value: "jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:

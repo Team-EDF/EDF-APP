@@ -67,6 +67,13 @@ spec:
                 secretKeyRef:
                   name: ai-secret
                   key: DB_PASSWORD
+            # 현재 AI DB 코드 호환 alias.
+            # GitHub/Kubernetes Secret 이름은 DB_USERNAME/DB_PASSWORD로 유지한다.
+            - name: DB_USER
+              value: "$(DB_USERNAME)"
+            - name: DB_PASS
+              value: "$(DB_PASSWORD)"
+
             - name: OPENAI_API_KEY
               valueFrom:
                 secretKeyRef:
