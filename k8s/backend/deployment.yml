@@ -68,7 +68,7 @@ spec:
             # Secret은 통일된 DB_HOST/DB_PORT/DB_NAME 구조를 유지하고
             # Pod에서 DB_URL만 조합한다.
             - name: DB_URL
-              value: "jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)"
+              value: "jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=require"
             - name: JWT_SECRET
               valueFrom:
                 secretKeyRef:
