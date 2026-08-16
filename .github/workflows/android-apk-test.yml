@@ -1,0 +1,276 @@
+name: Build GreenStep Test APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_ref_note:
+        description: "EDF-APP의 현재 frontend/EDF-FE submodule commit을 사용합니다. 필요 시 메모만 입력"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: greenstep-android-apk-test
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "22.11.0"
+  JAVA_VERSION: "17"
+  FE_DIR: frontend/EDF-FE
+
+jobs:
+  build-test-apk:
+    name: Build standalone Android APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout EDF-APP with submodules
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          submodules: recursive
+          token: ${{ secrets.GH_PAT }}
+
+      - name: Validate integrated frontend
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -d "${FE_DIR}" || {
+            echo "::error::${FE_DIR} submodule directory was not found."
+            exit 1
+          }
+
+          required_files=(
+            "${FE_DIR}/package.json"
+            "${FE_DIR}/package-lock.json"
+            "${FE_DIR}/scripts/sync-env.js"
+            "${FE_DIR}/android/gradlew"
+            "${FE_DIR}/android/app/build.gradle"
+            "${FE_DIR}/android/app/src/main/AndroidManifest.xml"
+          )
+
+          for file in "${required_files[@]}"; do
+            test -f "${file}" || {
+              echo "::error::Required EDF-FE file not found: ${file}"
+              exit 1
+            }
+          done
+
+          echo "APP_COMMIT=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
+          echo "FE_COMMIT=$(git -C "${FE_DIR}" rev-parse HEAD)" >> "${GITHUB_ENV}"
+
+      - name: Validate test environment values
+        env:
+          ANDROID_BASE_URL: ${{ vars.ANDROID_BASE_URL }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          required_names=(
+            ANDROID_BASE_URL
+            GOOGLE_CLIENT_ID
+            NAVER_CLIENT_ID
+            NAVER_CLIENT_SECRET
+            KAKAO_APP_KEY
+          )
+
+          for name in "${required_names[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Required GitHub Secret/Variable is missing: ${name}"
+              exit 1
+            fi
+          done
+
+          if [[ ! "${ANDROID_BASE_URL}" =~ ^https?:// ]]; then
+            echo "::error::ANDROID_BASE_URL must start with http:// or https://"
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/EDF-FE/package-lock.json
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Ensure Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! command -v sdkmanager >/dev/null 2>&1; then
+            echo "::error::sdkmanager is not available on this GitHub runner."
+            exit 1
+          fi
+
+          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006"
+
+      - name: Install frontend dependencies
+        working-directory: frontend/EDF-FE
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm ci --no-audit --no-fund
+
+      - name: Create EDF-FE test environment
+        working-directory: frontend/EDF-FE
+        env:
+          ANDROID_BASE_URL: ${{ vars.ANDROID_BASE_URL }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cat > .env <<EOF
+          BASE_URL=${ANDROID_BASE_URL}
+          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+          NAVER_APP_NAME=GreenStep
+          NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
+          NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
+          NAVER_URL_SCHEME=naverlogin
+          KAKAO_APP_KEY=${KAKAO_APP_KEY}
+          EOF
+
+          chmod 600 .env
+
+          if [[ "${ANDROID_BASE_URL}" == https://* ]]; then
+            echo "ANDROID_CLEARTEXT=false" >> "${GITHUB_ENV}"
+          else
+            echo "ANDROID_CLEARTEXT=true" >> "${GITHUB_ENV}"
+          fi
+
+      - name: Apply EDF-FE environment sync
+        working-directory: frontend/EDF-FE
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # EDF-FE 자체에 포함된 공식 동기화 스크립트를 실행합니다.
+          # Kakao/Google 설정을 Android/iOS native 설정에 반영합니다.
+          node scripts/sync-env.js
+
+      - name: Resolve current Android manifest placeholder
+        working-directory: frontend/EDF-FE
+        env:
+          ANDROID_CLEARTEXT: ${{ env.ANDROID_CLEARTEXT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+
+          # 현재 EDF-FE는 ${usesCleartextTraffic} placeholder를 선언하지만
+          # build.gradle에서 manifestPlaceholders 값을 제공하지 않습니다.
+          # 1차 APK 테스트를 위해 GitHub runner의 작업 사본에서만 값을 치환합니다.
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          text = path.read_text(encoding="utf-8")
+          value = os.environ["ANDROID_CLEARTEXT"].lower()
+
+          token = "${usesCleartextTraffic}"
+          if token in text:
+              text = text.replace(token, value)
+              path.write_text(text, encoding="utf-8")
+              print(f"Resolved usesCleartextTraffic={value}")
+          else:
+              print("usesCleartextTraffic placeholder is already resolved by EDF-FE; no CI patch needed.")
+          PY
+
+      - name: Build standalone Release APK
+        working-directory: frontend/EDF-FE/android
+        env:
+          ENVFILE: ${{ github.workspace }}/frontend/EDF-FE/.env
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          chmod +x gradlew
+
+          ./gradlew \
+            assembleRelease \
+            --no-daemon \
+            --stacktrace \
+            --build-cache
+
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p apk-output
+
+          APK_PATH="$(find "${FE_DIR}/android/app/build/outputs/apk/release" \
+            -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+
+          if [[ -z "${APK_PATH}" || ! -f "${APK_PATH}" ]]; then
+            echo "::error::Release APK was not generated."
+            exit 1
+          fi
+
+          OUTPUT_NAME="GreenStep-test-${GITHUB_RUN_NUMBER}-${FE_COMMIT:0:7}.apk"
+          cp "${APK_PATH}" "apk-output/${OUTPUT_NAME}"
+
+          echo "APK_OUTPUT_NAME=${OUTPUT_NAME}" >> "${GITHUB_ENV}"
+          echo "APK_SOURCE_PATH=${APK_PATH}" >> "${GITHUB_ENV}"
+
+          ls -lh apk-output/
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: greenstep-test-apk-${{ github.run_number }}
+          path: apk-output/*.apk
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Write build summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## GreenStep APK Build"
+            echo ""
+            echo "- EDF-APP commit: \`${APP_COMMIT:-unknown}\`"
+            echo "- EDF-FE submodule commit: \`${FE_COMMIT:-unknown}\`"
+            echo "- API URL: \`${{ vars.ANDROID_BASE_URL }}\`"
+            echo "- Build: \`assembleRelease\`"
+            echo "- APK: \`${APK_OUTPUT_NAME:-build failed}\`"
+            echo ""
+            echo "성공 시 Actions 실행 화면의 Artifacts에서 APK를 내려받아 Android 휴대폰에 직접 설치하세요."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Cleanup generated environment
+        if: always()
+        working-directory: frontend/EDF-FE
+        shell: bash
+        run: |
+          rm -f .env
