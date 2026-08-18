@@ -17,107 +17,107 @@ spec:
     spec:
       serviceAccountName: ai-service-account
       containers:
-      - name: ai-container
-        image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-ai:82f2b20
-        imagePullPolicy: IfNotPresent
-        ports:
-        - name: http
-          containerPort: 8000
-        resources:
-          requests:
-            cpu: 250m
-            memory: 1Gi
-          limits:
-            cpu: '1'
-            memory: 3Gi
-        env:
-        - name: SERVER_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: ai-config
-              key: SERVER_PORT
-        - name: APP_ENV
-          valueFrom:
-            configMapKeyRef:
-              name: ai-config
-              key: APP_ENV
-        - name: DB_HOST
-          valueFrom:
-            secretKeyRef:
-              name: ai-secret
-              key: DB_HOST
-        - name: DB_PORT
-          valueFrom:
-            secretKeyRef:
-              name: ai-secret
-              key: DB_PORT
-        - name: DB_NAME
-          valueFrom:
-            secretKeyRef:
-              name: ai-secret
-              key: DB_NAME
-        - name: DB_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: ai-secret
-              key: DB_USERNAME
-        - name: DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: ai-secret
-              key: DB_PASSWORD
-        - name: DB_USER
-          value: $(DB_USERNAME)
-        - name: DB_PASS
-          value: $(DB_PASSWORD)
-        - name: PGSSLMODE
-          value: require
-        - name: OPENAI_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: ai-secret
-              key: OPENAI_API_KEY
-              optional: true
-        - name: SBERT_MODEL_PATH
-          valueFrom:
-            configMapKeyRef:
-              name: ai-config
-              key: SBERT_MODEL_PATH
-        - name: S3_BUCKET_NAME
-          valueFrom:
-            configMapKeyRef:
-              name: ai-config
-              key: S3_BUCKET_NAME
-        - name: S3_UPLOAD_PREFIX
-          valueFrom:
-            configMapKeyRef:
-              name: ai-config
-              key: S3_UPLOAD_PREFIX
-        readinessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-        livenessProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          periodSeconds: 20
-          timeoutSeconds: 3
-          failureThreshold: 3
-        startupProbe:
-          httpGet:
-            path: /health
-            port: 8000
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 30
-        volumeMounts:
-        - name: sbert-model
-          mountPath: /app/app/services/greenstep_sbert_v2
-          readOnly: true
+        - name: ai-container
+          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-ai:0f42595
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: '1'
+              memory: 3Gi
+          env:
+            - name: SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: SERVER_PORT
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: APP_ENV
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_NAME
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_PASSWORD
+            - name: DB_USER
+              value: $(DB_USERNAME)
+            - name: DB_PASS
+              value: $(DB_PASSWORD)
+            - name: PGSSLMODE
+              value: require
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: OPENAI_API_KEY
+                  optional: true
+            - name: SBERT_MODEL_PATH
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: SBERT_MODEL_PATH
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: S3_BUCKET_NAME
+            - name: S3_UPLOAD_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: S3_UPLOAD_PREFIX
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+          volumeMounts:
+            - name: sbert-model
+              mountPath: /app/app/services/greenstep_sbert_v2
+              readOnly: true
       initContainers:
       - name: sbert-model-loader
         image: public.ecr.aws/aws-cli/aws-cli:2.36.24
@@ -159,21 +159,21 @@ spec:
             cpu: 250m
             memory: 512Mi
       volumes:
-      - name: sbert-model
-        emptyDir: {}
+        - name: sbert-model
+          emptyDir: {}
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
-          - weight: 100
-            podAffinityTerm:
-              labelSelector:
-                matchExpressions:
-                - key: app
-                  operator: In
-                  values:
-                  - backend
-                  - redis
-              topologyKey: kubernetes.io/hostname
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - backend
+                        - redis
+                topologyKey: kubernetes.io/hostname
   revisionHistoryLimit: 2
   strategy:
     type: RollingUpdate

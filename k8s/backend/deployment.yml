@@ -21,173 +21,173 @@ spec:
     spec:
       serviceAccountName: backend-service-account
       containers:
-      - name: backend-container
-        image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:3a0382a
-        imagePullPolicy: IfNotPresent
-        ports:
-        - name: http
-          containerPort: 8080
-        resources:
-          requests:
-            cpu: 250m
-            memory: 512Mi
-          limits:
-            cpu: '1'
-            memory: 1Gi
-        env:
-        - name: DB_HOST
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: DB_HOST
-        - name: DB_PORT
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: DB_PORT
-        - name: DB_NAME
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: DB_NAME
-        - name: DB_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: DB_USERNAME
-        - name: DB_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: DB_PASSWORD
-        - name: DB_URL
-          value: jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=require
-        - name: JWT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: JWT_SECRET
-        - name: REDIS_HOST
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: REDIS_HOST
-        - name: REDIS_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: REDIS_PORT
-        - name: AI_SERVICE_URL
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: AI_SERVICE_URL
-        - name: AWS_REGION
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: AWS_REGION
-        - name: S3_BUCKET_NAME
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: S3_BUCKET_NAME
-        - name: S3_UPLOAD_PREFIX
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: S3_UPLOAD_PREFIX
-        - name: SERVER_PORT
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: SERVER_PORT
-        - name: MAIL_USERNAME
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: MAIL_USERNAME
-        - name: MAIL_APP_PASSWORD
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: MAIL_APP_PASSWORD
-        - name: GOOGLE_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: GOOGLE_CLIENT_ID
-        - name: GOOGLE_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: GOOGLE_CLIENT_SECRET
-        - name: NAVER_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: NAVER_CLIENT_ID
-        - name: NAVER_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: NAVER_CLIENT_SECRET
-        - name: KAKAO_CLIENT_ID
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: KAKAO_CLIENT_ID
-        - name: KAKAO_CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: KAKAO_CLIENT_SECRET
-        - name: GOOGLE_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: GOOGLE_API_KEY
-        - name: KAKAO_API_KEY
-          valueFrom:
-            secretKeyRef:
-              name: backend-secret
-              key: KAKAO_API_KEY
-        - name: JWT_ACCESS_EXP
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: JWT_ACCESS_EXP
-        - name: JWT_REFRESH_EXP
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: JWT_REFRESH_EXP
-        - name: FILE_UPLOAD_DIR
-          valueFrom:
-            configMapKeyRef:
-              name: backend-config
-              key: FILE_UPLOAD_DIR
-        readinessProbe:
-          httpGet:
-            path: /actuator/health/readiness
-            port: 8080
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 3
-        livenessProbe:
-          httpGet:
-            path: /actuator/health/liveness
-            port: 8080
-          periodSeconds: 20
-          timeoutSeconds: 3
-          failureThreshold: 3
-        startupProbe:
-          httpGet:
-            path: /actuator/health/liveness
-            port: 8080
-          periodSeconds: 10
-          timeoutSeconds: 3
-          failureThreshold: 18
+        - name: backend-container
+          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:97ae854
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: '1'
+              memory: 1Gi
+          env:
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: DB_NAME
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: DB_PASSWORD
+            - name: DB_URL
+              value: jdbc:postgresql://$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=require
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: JWT_SECRET
+            - name: REDIS_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: REDIS_HOST
+            - name: REDIS_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: REDIS_PORT
+            - name: AI_SERVICE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: AI_SERVICE_URL
+            - name: AWS_REGION
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: AWS_REGION
+            - name: S3_BUCKET_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: S3_BUCKET_NAME
+            - name: S3_UPLOAD_PREFIX
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: S3_UPLOAD_PREFIX
+            - name: SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: SERVER_PORT
+            - name: MAIL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: MAIL_USERNAME
+            - name: MAIL_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: MAIL_APP_PASSWORD
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: GOOGLE_CLIENT_ID
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: GOOGLE_CLIENT_SECRET
+            - name: NAVER_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: NAVER_CLIENT_ID
+            - name: NAVER_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: NAVER_CLIENT_SECRET
+            - name: KAKAO_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: KAKAO_CLIENT_ID
+            - name: KAKAO_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: KAKAO_CLIENT_SECRET
+            - name: GOOGLE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: GOOGLE_API_KEY
+            - name: KAKAO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: KAKAO_API_KEY
+            - name: JWT_ACCESS_EXP
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: JWT_ACCESS_EXP
+            - name: JWT_REFRESH_EXP
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: JWT_REFRESH_EXP
+            - name: FILE_UPLOAD_DIR
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: FILE_UPLOAD_DIR
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 18
   revisionHistoryLimit: 2
   strategy:
     type: RollingUpdate
