@@ -8,58 +8,41 @@ on:
         required: true
         default: true
         type: boolean
-
       build_android:
-        description: "EDF-FE Android 앱 빌드"
+        description: "Android Release APK/AAB 빌드 (서버 1차 배포 중에는 false 권장)"
         required: true
         default: false
         type: boolean
-
-      android_build_type:
-        description: "Android 빌드 종류"
-        required: true
-        default: "debug"
-        type: choice
-        options:
-          - debug
-          - release
-
       publish_android:
-        description: "Release AAB를 Google Play에 업로드"
+        description: "빌드한 AAB를 Google Play에 업로드"
         required: true
         default: false
         type: boolean
-
       backend_ref:
         description: "EDF-BE Branch 또는 Tag"
         required: true
         default: "main"
         type: string
-
       ai_ref:
         description: "EDF-AI Branch 또는 Tag"
         required: true
         default: "main"
         type: string
-
       frontend_ref:
         description: "EDF-FE Branch 또는 Tag"
         required: true
         default: "main"
         type: string
-
       android_version_name:
-        description: "Android versionName (release에서 사용)"
+        description: "Android versionName"
         required: true
         default: "1.0.0"
         type: string
-
       android_version_code:
         description: "Android versionCode. 비워두면 Workflow run number 사용"
         required: false
         default: ""
         type: string
-
       play_track:
         description: "Google Play Track"
         required: true
@@ -70,7 +53,6 @@ on:
           - alpha
           - beta
           - production
-
       play_status:
         description: "Google Play Release 상태"
         required: true
@@ -80,11 +62,9 @@ on:
           - draft
           - completed
 
-
 concurrency:
   group: edf-platform-deploy
   cancel-in-progress: false
-
 
 env:
   AWS_REGION: ap-northeast-2
@@ -92,18 +72,11 @@ env:
   EDF_NAMESPACE: edf
   ARGOCD_NAMESPACE: argocd
   TARGET_BRANCH: main
-
   NODE_VERSION: "22.11.0"
-  JAVA_VERSION: "21"
+  JAVA_VERSION: "17"
   ANDROID_PACKAGE_NAME: com.greenstep
 
-
 jobs:
-
-  # ============================================================
-  # Backend + AI
-  # ============================================================
-
   deploy-server:
     if: ${{ inputs.deploy_server == true }}
     runs-on: ubuntu-latest
@@ -119,15 +92,6 @@ jobs:
       ai_image: ${{ steps.images.outputs.ai_image }}
 
     steps:
-
-      # --------------------------------------------------------
-      # EDF-APP
-      #
-      # 중요:
-      # 여기서는 credential을 checkout action에 남기지 않는다.
-      # 실제 push 단계에서 github.token을 명시적으로 사용한다.
-      # --------------------------------------------------------
-
       - name: Checkout EDF-APP
         uses: actions/checkout@v6
         with:
@@ -136,16 +100,8 @@ jobs:
           token: ${{ github.token }}
           persist-credentials: false
 
-
-      # --------------------------------------------------------
-      # Backend source
-      #
-      # 다른 Private Repository를 읽기 위해 GH_PAT 사용
-      # push credential에는 절대 사용하지 않음
-      # --------------------------------------------------------
-
       - name: Checkout EDF-BE
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Team-EDF/EDF-BE
           ref: ${{ inputs.backend_ref }}
@@ -154,13 +110,8 @@ jobs:
           token: ${{ secrets.GH_PAT }}
           persist-credentials: false
 
-
-      # --------------------------------------------------------
-      # AI source
-      # --------------------------------------------------------
-
       - name: Checkout EDF-AI
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Team-EDF/EDF-AI
           ref: ${{ inputs.ai_ref }}
@@ -168,11 +119,6 @@ jobs:
           fetch-depth: 1
           token: ${{ secrets.GH_PAT }}
           persist-credentials: false
-
-
-      # --------------------------------------------------------
-      # Validation
-      # --------------------------------------------------------
 
       - name: Validate server deployment values
         env:
@@ -200,44 +146,35 @@ jobs:
 
           test -f backend/Dockerfile
           test -f ai/Dockerfile
-
           test -f k8s/backend/deployment.yml
           test -f k8s/ai/deployment.yml
 
-          if [[ ! -f sources/backend/build.gradle && ! -f sources/backend/build.gradle.kts ]]; then
-            echo "::error::EDF-BE Gradle build file was not found."
-            exit 1
-          fi
+          for file in build.gradle settings.gradle gradlew; do
+            if [[ ! -f "sources/backend/${file}" ]]; then
+              echo "::error::EDF-BE ${file} not found. The current Backend Dockerfile expects a Groovy Gradle project."
+              exit 1
+            fi
+          done
 
-          if [[ ! -f sources/backend/settings.gradle && ! -f sources/backend/settings.gradle.kts ]]; then
-            echo "::error::EDF-BE Gradle settings file was not found."
-            exit 1
-          fi
-
-          test -f sources/backend/gradlew || {
-            echo "::error::EDF-BE gradlew was not found."
+          test -d sources/backend/gradle || {
+            echo "::error::EDF-BE Gradle wrapper directory not found."
             exit 1
           }
 
           test -d sources/backend/src || {
-            echo "::error::EDF-BE src directory was not found."
+            echo "::error::EDF-BE src directory not found."
             exit 1
           }
 
           test -f sources/ai/requirements.txt || {
-            echo "::error::EDF-AI requirements.txt was not found."
+            echo "::error::EDF-AI requirements.txt not found."
             exit 1
           }
 
           test -f sources/ai/main.py || {
-            echo "::error::EDF-AI main.py was not found."
+            echo "::error::EDF-AI main.py not found."
             exit 1
           }
-
-
-      # --------------------------------------------------------
-      # Resolve source versions
-      # --------------------------------------------------------
 
       - name: Resolve source versions
         id: source_versions
@@ -250,14 +187,8 @@ jobs:
 
           echo "backend_commit=${BACKEND_COMMIT}" >> "${GITHUB_OUTPUT}"
           echo "ai_commit=${AI_COMMIT}" >> "${GITHUB_OUTPUT}"
-
           echo "BACKEND_IMAGE_TAG=${BACKEND_COMMIT:0:7}" >> "${GITHUB_ENV}"
           echo "AI_IMAGE_TAG=${AI_COMMIT:0:7}" >> "${GITHUB_ENV}"
-
-
-      # --------------------------------------------------------
-      # AWS
-      # --------------------------------------------------------
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -265,38 +196,71 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Update EKS kubeconfig
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          aws eks update-kubeconfig \
+            --region "${AWS_REGION}" \
+            --name "${EKS_CLUSTER_NAME}"
+
+      - name: Cluster preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo '=== Nodes ==='
+          kubectl get nodes -L node.kubernetes.io/instance-type
+          kubectl get nodes \
+            -o custom-columns='NAME:.metadata.name,TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,READY:.status.conditions[?(@.type=="Ready")].status,POD_CAPACITY:.status.capacity.pods'
+
+          TOTAL_NODES="$(kubectl get nodes --no-headers | wc -l | tr -d ' ')"
+          READY_NODES="$(kubectl get nodes --no-headers | awk '$2 == "Ready" {count++} END {print count+0}')"
+
+          if [[ "${READY_NODES}" -lt 2 || "${READY_NODES}" -ne "${TOTAL_NODES}" ]]; then
+            echo "::error::Cluster is not ready for a deployment (${READY_NODES}/${TOTAL_NODES} Ready nodes)."
+            exit 1
+          fi
+
+          echo '=== CNI ==='
+          kubectl rollout status daemonset/aws-node \
+            -n kube-system \
+            --timeout=3m
+
+          echo '=== Load Balancer Controller ==='
+          kubectl rollout status deployment/aws-load-balancer-controller \
+            -n kube-system \
+            --timeout=3m
+
+          echo '=== ArgoCD ==='
+          kubectl rollout status deployment/argocd-server \
+            -n "${ARGOCD_NAMESPACE}" \
+            --timeout=3m
+          kubectl rollout status deployment/argocd-repo-server \
+            -n "${ARGOCD_NAMESPACE}" \
+            --timeout=3m
+
+          echo '=== Existing Pending Pods (informational) ==='
+          kubectl get pods -A --field-selector=status.phase=Pending -o wide || true
 
       - name: Resolve and validate ECR
         shell: bash
         run: |
           set -euo pipefail
 
-          AWS_ACCOUNT_ID="$(
-            aws sts get-caller-identity \
-              --query Account \
-              --output text
-          )"
-
+          AWS_ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
           ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-
           echo "ECR_REGISTRY=${ECR_REGISTRY}" >> "${GITHUB_ENV}"
 
-          aws ecr describe-repositories \
-            --repository-names edf-backend \
-            > /dev/null
-
-          aws ecr describe-repositories \
-            --repository-names edf-ai \
-            > /dev/null
-
+          aws ecr describe-repositories --repository-names edf-backend > /dev/null
+          aws ecr describe-repositories --repository-names edf-ai > /dev/null
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
-
-
-      # --------------------------------------------------------
-      # Backend image
-      # --------------------------------------------------------
 
       - name: Build and push Backend image
         shell: bash
@@ -312,13 +276,7 @@ jobs:
             sources/backend
 
           docker push "${BACKEND_IMAGE}"
-
           echo "BACKEND_IMAGE=${BACKEND_IMAGE}" >> "${GITHUB_ENV}"
-
-
-      # --------------------------------------------------------
-      # AI image
-      # --------------------------------------------------------
 
       - name: Build and push AI image
         shell: bash
@@ -334,42 +292,25 @@ jobs:
             sources/ai
 
           docker push "${AI_IMAGE}"
-
           echo "AI_IMAGE=${AI_IMAGE}" >> "${GITHUB_ENV}"
-
 
       - name: Export image outputs
         id: images
         shell: bash
         run: |
-          set -euo pipefail
-
           echo "backend_image=${BACKEND_IMAGE}" >> "${GITHUB_OUTPUT}"
           echo "ai_image=${AI_IMAGE}" >> "${GITHUB_OUTPUT}"
-
-
-      # --------------------------------------------------------
-      # yq
-      # --------------------------------------------------------
 
       - name: Install yq
         shell: bash
         run: |
           set -euo pipefail
 
-          sudo wget \
-            --quiet \
+          sudo wget --quiet \
             --output-document=/usr/local/bin/yq \
             https://github.com/mikefarah/yq/releases/download/v4.44.2/yq_linux_amd64
-
           sudo chmod +x /usr/local/bin/yq
-
           yq --version
-
-
-      # --------------------------------------------------------
-      # Kubernetes image tag 변경
-      # --------------------------------------------------------
 
       - name: Update Kubernetes image tags
         shell: bash
@@ -377,33 +318,14 @@ jobs:
           set -euo pipefail
 
           BACKEND_IMAGE="${BACKEND_IMAGE}" yq -i '
-            (
-              .spec.template.spec.containers[]
-              | select(.name == "backend-container").image
-            ) = strenv(BACKEND_IMAGE)
+            (.spec.template.spec.containers[]
+              | select(.name == "backend-container").image) = strenv(BACKEND_IMAGE)
           ' k8s/backend/deployment.yml
 
           AI_IMAGE="${AI_IMAGE}" yq -i '
-            (
-              .spec.template.spec.containers[]
-              | select(.name == "ai-container").image
-            ) = strenv(AI_IMAGE)
+            (.spec.template.spec.containers[]
+              | select(.name == "ai-container").image) = strenv(AI_IMAGE)
           ' k8s/ai/deployment.yml
-
-
-      # --------------------------------------------------------
-      # GitOps Commit + Push
-      #
-      # 중요 수정:
-      #
-      # GH_PAT 사용 안 함
-      #
-      # github.token을 HTTP Authorization Header로
-      # 명시적으로 사용한다.
-      #
-      # 따라서 이전 checkout credential이나
-      # WoojuHwww PAT가 push에 개입할 수 없다.
-      # --------------------------------------------------------
 
       - name: Commit GitOps manifests
         env:
@@ -424,13 +346,7 @@ jobs:
             exit 0
           fi
 
-          git commit \
-            -m "chore(deploy): backend ${BACKEND_IMAGE_TAG}, ai ${AI_IMAGE_TAG} [skip ci]"
-
-          echo "Preparing authenticated GitHub push..."
-          echo "Repository: ${GITHUB_REPOSITORY}"
-          echo "Branch: ${TARGET_BRANCH}"
-          echo "Workflow actor: ${GITHUB_ACTOR}"
+          git commit -m "chore(deploy): backend ${BACKEND_IMAGE_TAG}, ai ${AI_IMAGE_TAG} [skip ci]"
 
           AUTH_HEADER="$(
             printf 'x-access-token:%s' "${GITHUB_PUSH_TOKEN}" \
@@ -438,49 +354,17 @@ jobs:
               | tr -d '\n'
           )"
 
-          # ----------------------------------------------------
-          # Remote 최신 상태를 GITHUB_TOKEN으로 가져온다.
-          # ----------------------------------------------------
-
           git \
             -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
-            pull \
-            --rebase \
+            pull --rebase \
             "https://github.com/${GITHUB_REPOSITORY}.git" \
             "${TARGET_BRANCH}"
-
-          # ----------------------------------------------------
-          # EDF-APP main에 GITHUB_TOKEN으로 Push
-          # ----------------------------------------------------
 
           git \
             -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${AUTH_HEADER}" \
             push \
             "https://github.com/${GITHUB_REPOSITORY}.git" \
             "HEAD:${TARGET_BRANCH}"
-
-
-      # --------------------------------------------------------
-      # kubectl
-      # --------------------------------------------------------
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-
-      - name: Update EKS kubeconfig
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          aws eks update-kubeconfig \
-            --region "${AWS_REGION}" \
-            --name "${EKS_CLUSTER_NAME}"
-
-
-      # --------------------------------------------------------
-      # ArgoCD Refresh
-      # --------------------------------------------------------
 
       - name: Refresh ArgoCD applications
         shell: bash
@@ -497,12 +381,7 @@ jobs:
             argocd.argoproj.io/refresh=hard \
             --overwrite
 
-
-      # --------------------------------------------------------
-      # Wait for rollout
-      # --------------------------------------------------------
-
-      - name: Wait for ArgoCD rollout
+      - name: Wait for ArgoCD to apply new images
         shell: bash
         run: |
           set -euo pipefail
@@ -513,7 +392,6 @@ jobs:
             local expected_image="$3"
 
             for attempt in $(seq 1 60); do
-
               current_image="$(
                 kubectl get deployment "${deployment}" \
                   -n "${EDF_NAMESPACE}" \
@@ -527,55 +405,82 @@ jobs:
               fi
 
               echo "Waiting for ${deployment}: current='${current_image:-not-created}', expected='${expected_image}'"
-
-              sleep 10
+              sleep 5
             done
 
-            echo "::error::ArgoCD did not apply ${expected_image} to ${deployment} within 10 minutes."
-
+            echo "::error::ArgoCD did not apply ${expected_image} to ${deployment} within 5 minutes."
             return 1
           }
 
-          wait_for_image \
-            backend-depl \
-            backend-container \
-            "${BACKEND_IMAGE}"
+          wait_for_image backend-depl backend-container "${BACKEND_IMAGE}"
+          wait_for_image ai-depl ai-container "${AI_IMAGE}"
 
-          wait_for_image \
-            ai-depl \
-            ai-container \
-            "${AI_IMAGE}"
-
-          kubectl rollout status \
-            deployment/backend-depl \
+          kubectl rollout status deployment/backend-depl \
             -n "${EDF_NAMESPACE}" \
             --timeout=10m
 
-          kubectl rollout status \
-            deployment/ai-depl \
+          kubectl rollout status deployment/ai-depl \
             -n "${EDF_NAMESPACE}" \
             --timeout=10m
 
+      - name: Collect server deployment diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          set +e
 
+          if ! command -v kubectl >/dev/null 2>&1; then
+            echo "kubectl is not available; skipping cluster diagnostics."
+            exit 0
+          fi
 
-  # ============================================================
-  # Android
-  # ============================================================
+          if ! kubectl cluster-info >/dev/null 2>&1; then
+            echo "Kubernetes cluster is not reachable; skipping cluster diagnostics."
+            exit 0
+          fi
+
+          echo '===== NODES ====='
+          kubectl get nodes -o wide
+
+          echo '===== ALL PODS ====='
+          kubectl get pods -A -o wide
+
+          echo '===== EDF DEPLOYMENTS ====='
+          kubectl get deployment -n "${EDF_NAMESPACE}" -o wide
+
+          echo '===== ARGOCD APPLICATIONS ====='
+          kubectl get applications -n "${ARGOCD_NAMESPACE}" -o wide
+
+          echo '===== RECENT EVENTS ====='
+          kubectl get events -A --sort-by=.lastTimestamp | tail -n 120
+
+          for app in backend ai; do
+            echo "===== ${app^^} PODS ====="
+            kubectl get pods -n "${EDF_NAMESPACE}" -l "app=${app}" -o wide
+
+            POD="$(
+              kubectl get pods -n "${EDF_NAMESPACE}" -l "app=${app}" \
+                --sort-by=.metadata.creationTimestamp \
+                -o jsonpath='{.items[-1:].metadata.name}' 2>/dev/null
+            )"
+
+            if [[ -n "${POD}" ]]; then
+              echo "===== ${app^^} NEWEST POD: ${POD} ====="
+              kubectl describe pod "${POD}" -n "${EDF_NAMESPACE}"
+              kubectl logs "${POD}" -n "${EDF_NAMESPACE}" --tail=200
+              kubectl logs "${POD}" -n "${EDF_NAMESPACE}" --previous --tail=200
+            fi
+          done
 
   build-and-publish-android:
     needs:
       - deploy-server
-
     if: >-
       ${{
         always() &&
         inputs.build_android == true &&
-        (
-          needs['deploy-server'].result == 'success' ||
-          needs['deploy-server'].result == 'skipped'
-        )
+        (needs['deploy-server'].result == 'success' || needs['deploy-server'].result == 'skipped')
       }}
-
     runs-on: ubuntu-latest
 
     permissions:
@@ -587,9 +492,8 @@ jobs:
       version_name: ${{ steps.android_version.outputs.version_name }}
 
     steps:
-
       - name: Checkout EDF-FE
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Team-EDF/EDF-FE
           ref: ${{ inputs.frontend_ref }}
@@ -597,65 +501,47 @@ jobs:
           token: ${{ secrets.GH_PAT }}
           persist-credentials: false
 
-
-      - name: Validate Android values
+      - name: Validate Android deployment values
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
-
           ANDROID_BASE_URL: ${{ vars.ANDROID_BASE_URL }}
-
-          ANDROID_BUILD_TYPE: ${{ inputs.android_build_type }}
-          PUBLISH_ANDROID: ${{ inputs.publish_android }}
-
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-
+          PUBLISH_ANDROID: ${{ inputs.publish_android }}
         shell: bash
         run: |
           set -euo pipefail
 
-          test -n "${GH_PAT}" || {
-            echo "::error::GH_PAT is required to checkout EDF-FE."
-            exit 1
-          }
+          required_names=(
+            GH_PAT
+            ANDROID_BASE_URL
+            ANDROID_KEYSTORE_BASE64
+            ANDROID_KEYSTORE_PASSWORD
+            ANDROID_KEY_ALIAS
+            ANDROID_KEY_PASSWORD
+            GOOGLE_WEB_CLIENT_ID
+            NAVER_CLIENT_ID
+            NAVER_CLIENT_SECRET
+            KAKAO_APP_KEY
+          )
 
-          test -f package.json
-          test -f package-lock.json
-
-          test -f android/gradlew
-          test -f android/app/build.gradle
-          test -f android/app/src/main/AndroidManifest.xml
-
-          if [[ "${PUBLISH_ANDROID}" == "true" && "${ANDROID_BUILD_TYPE}" != "release" ]]; then
-            echo "::error::publish_android=true requires android_build_type=release."
-            exit 1
-          fi
-
-          if [[ "${ANDROID_BUILD_TYPE}" == "release" ]]; then
-
-            required_release_names=(
-              ANDROID_BASE_URL
-              ANDROID_KEYSTORE_BASE64
-              ANDROID_KEYSTORE_PASSWORD
-              ANDROID_KEY_ALIAS
-              ANDROID_KEY_PASSWORD
-            )
-
-            for name in "${required_release_names[@]}"; do
-              if [[ -z "${!name:-}" ]]; then
-                echo "::error::Required Android release value is missing: ${name}"
-                exit 1
-              fi
-            done
-
-            if [[ ! "${ANDROID_BASE_URL}" =~ ^https:// ]]; then
-              echo "::error::ANDROID_BASE_URL must start with https:// for a release build."
+          for name in "${required_names[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::Required Android Secret or Variable is missing: ${name}"
               exit 1
             fi
+          done
+
+          if [[ ! "${ANDROID_BASE_URL}" =~ ^https:// ]]; then
+            echo "::error::ANDROID_BASE_URL must start with https:// for a Release build."
+            exit 1
           fi
 
           if [[ "${PUBLISH_ANDROID}" == "true" && -z "${GOOGLE_PLAY_SERVICE_ACCOUNT_JSON:-}" ]]; then
@@ -663,10 +549,11 @@ jobs:
             exit 1
           fi
 
-
-      # --------------------------------------------------------
-      # Frontend version
-      # --------------------------------------------------------
+          test -f package.json
+          test -f package-lock.json
+          test -f android/gradlew
+          test -f android/app/build.gradle
+          test -f android/app/src/main/AndroidManifest.xml
 
       - name: Resolve Frontend source version
         id: frontend_version
@@ -675,13 +562,7 @@ jobs:
           set -euo pipefail
 
           FRONTEND_COMMIT="$(git rev-parse HEAD)"
-
           echo "frontend_commit=${FRONTEND_COMMIT}" >> "${GITHUB_OUTPUT}"
-
-
-      # --------------------------------------------------------
-      # Android version
-      # --------------------------------------------------------
 
       - name: Resolve Android version
         id: android_version
@@ -693,7 +574,6 @@ jobs:
           set -euo pipefail
 
           VERSION_CODE="${REQUESTED_VERSION_CODE:-}"
-
           if [[ -z "${VERSION_CODE}" ]]; then
             VERSION_CODE="${GITHUB_RUN_NUMBER}"
           fi
@@ -704,7 +584,6 @@ jobs:
           fi
 
           VERSION_NAME="${REQUESTED_VERSION_NAME}"
-
           if [[ -z "${VERSION_NAME}" ]]; then
             echo "::error::android_version_name must not be empty."
             exit 1
@@ -713,243 +592,49 @@ jobs:
           echo "version_code=${VERSION_CODE}" >> "${GITHUB_OUTPUT}"
           echo "version_name=${VERSION_NAME}" >> "${GITHUB_OUTPUT}"
 
-
-      # --------------------------------------------------------
-      # Node
-      # --------------------------------------------------------
-
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
-
-      # --------------------------------------------------------
-      # Java
-      # --------------------------------------------------------
-
       - name: Set up Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
-
 
       - name: Install JavaScript dependencies
         run: npm ci --no-audit --no-fund
 
-
-      # --------------------------------------------------------
-      # Frontend checks
-      # --------------------------------------------------------
-
-      - name: Run Frontend checks
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          npx tsc --noEmit
-          npm run lint
-          npm test -- --runInBand
-
-
-      # --------------------------------------------------------
-      # Android .env
-      # --------------------------------------------------------
-
-      - name: Create Android environment file
+      - name: Create production environment file
         env:
           ANDROID_BASE_URL: ${{ vars.ANDROID_BASE_URL }}
-
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-
           KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
-
-          ANDROID_BUILD_TYPE: ${{ inputs.android_build_type }}
-
         shell: bash
         run: |
           set -euo pipefail
 
-          BASE_URL="${ANDROID_BASE_URL:-}"
-
-          if [[ -z "${BASE_URL}" ]]; then
-            BASE_URL="http://10.0.2.2:8080"
-          fi
-
-          cat > .env <<EOF
-          BASE_URL=${BASE_URL}
-          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
-          NAVER_CLIENT_ID=${NAVER_CLIENT_ID:-}
-          NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET:-}
-          KAKAO_APP_KEY=${KAKAO_APP_KEY:-}
+          cat > .env.production <<EOF
+          BASE_URL=${ANDROID_BASE_URL}
+          GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID}
+          GOOGLE_IOS_CLIENT_ID=
+          NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
+          NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
+          KAKAO_APP_KEY=${KAKAO_APP_KEY}
           EOF
 
-          chmod 600 .env
-
-          if [[ "${ANDROID_BUILD_TYPE}" == "release" ]]; then
-            echo "ANDROID_USES_CLEARTEXT=false" >> "${GITHUB_ENV}"
-
-          elif [[ "${BASE_URL}" =~ ^https:// ]]; then
-            echo "ANDROID_USES_CLEARTEXT=false" >> "${GITHUB_ENV}"
-
-          else
-            echo "ANDROID_USES_CLEARTEXT=true" >> "${GITHUB_ENV}"
-          fi
-
-
-      # --------------------------------------------------------
-      # Gradle runner preparation
-      # --------------------------------------------------------
-
-      - name: Prepare Android Gradle build in runner
-        env:
-          ANDROID_BUILD_TYPE: ${{ inputs.android_build_type }}
-
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          python3 <<'PY'
-          from pathlib import Path
-          import os
-          import re
-
-          path = Path("android/app/build.gradle")
-
-          text = path.read_text(encoding="utf-8")
-
-          dotenv_block = '''
-          project.ext.envConfigFiles = [
-              debug: ".env",
-              release: ".env",
-          ]
-          apply from: project(':react-native-config').projectDir.getPath() + "/dotenv.gradle"
-          '''
-
-          if "dotenv.gradle" not in text:
-
-              marker = 'apply plugin: "com.facebook.react"\n'
-
-              if marker not in text:
-                  raise SystemExit(
-                      "Could not find React Native Gradle plugin marker."
-                  )
-
-              text = text.replace(
-                  marker,
-                  marker + dotenv_block + "\n",
-                  1
-              )
-
-          if "usesCleartextTraffic:" not in text:
-
-              marker = 'versionName "1.0"\n'
-
-              replacement = (
-                  marker
-                  + '        manifestPlaceholders = [usesCleartextTraffic: System.getenv("ANDROID_USES_CLEARTEXT") ?: "false"]\n'
-              )
-
-              if marker not in text:
-                  raise SystemExit(
-                      "Could not find versionName in defaultConfig."
-                  )
-
-              text = text.replace(
-                  marker,
-                  replacement,
-                  1
-              )
-
-          text = re.sub(
-              r'versionCode\s+1',
-              'versionCode (System.getenv("ANDROID_VERSION_CODE") ?: "1").toInteger()',
-              text,
-              count=1,
-          )
-
-          text = re.sub(
-              r'versionName\s+"1\.0"',
-              'versionName (System.getenv("ANDROID_VERSION_NAME") ?: "1.0")',
-              text,
-              count=1,
-          )
-
-          if os.environ.get("ANDROID_BUILD_TYPE") == "release":
-
-              release_signing = '''
-                  release {
-                      storeFile file(System.getenv("ANDROID_KEYSTORE_FILE"))
-                      storePassword System.getenv("ANDROID_KEYSTORE_PASSWORD")
-                      keyAlias System.getenv("ANDROID_KEY_ALIAS")
-                      keyPassword System.getenv("ANDROID_KEY_PASSWORD")
-                  }
-              '''
-
-              if 'release {\n            storeFile file(System.getenv("ANDROID_KEYSTORE_FILE"))' not in text:
-
-                  marker = '    signingConfigs {\n'
-
-                  if marker not in text:
-                      raise SystemExit(
-                          "Could not find signingConfigs block."
-                      )
-
-                  text = text.replace(
-                      marker,
-                      marker + release_signing,
-                      1
-                  )
-
-              old_signing = 'signingConfig signingConfigs.debug'
-
-              signing_index = text.rfind(old_signing)
-
-              if signing_index < 0:
-
-                  if 'signingConfig signingConfigs.release' not in text:
-                      raise SystemExit(
-                          "Could not find release signing configuration."
-                      )
-
-              else:
-
-                  text = (
-                      text[:signing_index]
-                      + 'signingConfig signingConfigs.release'
-                      + text[signing_index + len(old_signing):]
-                  )
-
-          path.write_text(
-              text,
-              encoding="utf-8"
-          )
-
-          PY
-
-          grep -n \
-            "dotenv.gradle\|manifestPlaceholders\|versionCode\|versionName\|signingConfig" \
-            android/app/build.gradle
-
-
-      # --------------------------------------------------------
-      # Keystore
-      # --------------------------------------------------------
+          chmod 600 .env.production
 
       - name: Decode Android upload keystore
-        if: ${{ inputs.android_build_type == 'release' }}
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-
         shell: bash
         run: |
           set -euo pipefail
@@ -960,211 +645,121 @@ jobs:
 
           chmod 600 android/app/release.keystore
 
-
       - name: Verify Android signing certificate
-        if: ${{ inputs.android_build_type == 'release' }}
-
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-
         shell: bash
         run: |
           set -euo pipefail
 
           KEYSTORE="android/app/release.keystore"
 
-          keytool \
-            -list \
-            -v \
+          keytool -list -v \
             -keystore "${KEYSTORE}" \
             -alias "${ANDROID_KEY_ALIAS}" \
             -storepass "${ANDROID_KEYSTORE_PASSWORD}" \
             | grep -E 'Alias name:|SHA1:|SHA256:' \
             | tee signing-fingerprints.txt
 
+          KAKAO_KEY_HASH="$(
+            keytool -exportcert \
+              -keystore "${KEYSTORE}" \
+              -alias "${ANDROID_KEY_ALIAS}" \
+              -storepass "${ANDROID_KEYSTORE_PASSWORD}" \
+              | openssl sha1 -binary \
+              | openssl base64
+          )"
 
-      # --------------------------------------------------------
-      # Debug APK
-      # --------------------------------------------------------
+          {
+            echo "## Android signing information"
+            echo ""
+            echo '```text'
+            cat signing-fingerprints.txt
+            echo "Kakao key hash: ${KAKAO_KEY_HASH}"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Build Android Debug APK
-        if: ${{ inputs.android_build_type == 'debug' }}
+      - name: Type check
+        run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test -- --runInBand
+
+      - name: Build signed Release AAB and APK
         working-directory: android
-
         env:
-          ENVFILE: ${{ github.workspace }}/.env
-          ANDROID_USES_CLEARTEXT: ${{ env.ANDROID_USES_CLEARTEXT }}
-          ANDROID_VERSION_CODE: ${{ steps.android_version.outputs.version_code }}
-          ANDROID_VERSION_NAME: ${{ steps.android_version.outputs.version_name }}
-
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          chmod +x gradlew
-
-          ./gradlew \
-            clean \
-            assembleDebug \
-            --no-daemon \
-            --stacktrace
-
-
-      # --------------------------------------------------------
-      # Release APK + AAB
-      # --------------------------------------------------------
-
-      - name: Build signed Android Release AAB and APK
-        if: ${{ inputs.android_build_type == 'release' }}
-
-        working-directory: android
-
-        env:
-          ENVFILE: ${{ github.workspace }}/.env
-
-          ANDROID_USES_CLEARTEXT: "false"
-
+          ENVFILE: ${{ github.workspace }}/.env.production
           ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/android/app/release.keystore
-
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-
           ANDROID_VERSION_CODE: ${{ steps.android_version.outputs.version_code }}
           ANDROID_VERSION_NAME: ${{ steps.android_version.outputs.version_name }}
-
         shell: bash
         run: |
           set -euo pipefail
 
           chmod +x gradlew
+          ./gradlew clean bundleRelease assembleRelease --no-daemon --stacktrace
 
-          ./gradlew \
-            clean \
-            bundleRelease \
-            assembleRelease \
-            --no-daemon \
-            --stacktrace
-
-
-      # --------------------------------------------------------
-      # Artifacts
-      # --------------------------------------------------------
-
-      - name: Upload Android Debug artifact
-        if: ${{ inputs.android_build_type == 'debug' }}
-
+      - name: Upload signed Android artifacts
         uses: actions/upload-artifact@v4
-
         with:
-          name: greenstep-android-debug-${{ steps.frontend_version.outputs.frontend_commit }}
-
-          path: android/app/build/outputs/apk/debug/*.apk
-
-          if-no-files-found: error
-
-          retention-days: 14
-
-
-      - name: Upload Android Release artifacts
-        if: ${{ inputs.android_build_type == 'release' }}
-
-        uses: actions/upload-artifact@v4
-
-        with:
-          name: greenstep-android-release-${{ steps.android_version.outputs.version_name }}-${{ steps.android_version.outputs.version_code }}
-
+          name: greenstep-android-${{ steps.android_version.outputs.version_name }}-${{ steps.android_version.outputs.version_code }}
           path: |
             android/app/build/outputs/bundle/release/*.aab
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/mapping/release/mapping.txt
             signing-fingerprints.txt
-
           if-no-files-found: error
-
           retention-days: 30
 
-
-      # --------------------------------------------------------
-      # Google Play
-      # --------------------------------------------------------
-
       - name: Publish AAB to Google Play
-        if: ${{ inputs.publish_android == true && inputs.android_build_type == 'release' }}
-
+        if: ${{ inputs.publish_android == true }}
         uses: r0adkll/upload-google-play@v1
-
         with:
           serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
-
           packageName: ${{ env.ANDROID_PACKAGE_NAME }}
-
           releaseFiles: android/app/build/outputs/bundle/release/*.aab
-
           track: ${{ inputs.play_track }}
-
           status: ${{ inputs.play_status }}
-
           releaseName: v${{ steps.android_version.outputs.version_name }}-${{ steps.android_version.outputs.version_code }}
 
-
-      # --------------------------------------------------------
-      # Cleanup
-      # --------------------------------------------------------
-
-      - name: Remove generated Android files
+      - name: Remove generated signing and environment files
         if: always()
-
         shell: bash
         run: |
           rm -f \
-            .env \
+            .env.production \
             android/app/release.keystore
 
-
-
-  # ============================================================
-  # Deployment Summary
-  # ============================================================
-
   deployment-summary:
-
     needs:
       - deploy-server
       - build-and-publish-android
-
     if: always()
-
     runs-on: ubuntu-latest
 
     permissions:
       contents: read
 
     steps:
-
       - name: Write deployment summary
         shell: bash
         run: |
           {
             echo "## EDF Deployment Result"
             echo ""
-
             echo "- Server job: \`${{ needs['deploy-server'].result }}\`"
             echo "- Android job: \`${{ needs['build-and-publish-android'].result }}\`"
-
             echo "- Backend commit: \`${{ needs['deploy-server'].outputs.backend_commit }}\`"
             echo "- AI commit: \`${{ needs['deploy-server'].outputs.ai_commit }}\`"
-
             echo "- Frontend commit: \`${{ needs['build-and-publish-android'].outputs.frontend_commit }}\`"
-
-            echo "- Android build type: \`${{ inputs.android_build_type }}\`"
-
             echo "- Android version: \`${{ needs['build-and-publish-android'].outputs.version_name }} (${{ needs['build-and-publish-android'].outputs.version_code }})\`"
-
             echo "- Google Play requested: \`${{ inputs.publish_android }}\`"
-
             echo "- Google Play track: \`${{ inputs.play_track }}\`"
-
           } >> "${GITHUB_STEP_SUMMARY}"

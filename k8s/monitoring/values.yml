@@ -1,21 +1,12 @@
 grafana:
-  enabled: true
-  adminUser: admin
-  adminPassword: admin1234
-
-  service:
-    type: ClusterIP
-
+  enabled: false
 prometheus:
   prometheusSpec:
-    retention: 7d
-    scrapeInterval: 30s
-
+    retention: 1d
+    scrapeInterval: 60s
 alertmanager:
   enabled: false
-
 kubeStateMetrics:
   enabled: true
-
 nodeExporter:
-  enabled: true
+  enabled: false
