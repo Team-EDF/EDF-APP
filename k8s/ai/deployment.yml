@@ -119,39 +119,45 @@ spec:
               mountPath: /app/app/services/greenstep_sbert_v2
               readOnly: true
       initContainers:
-        - name: sbert-model-loader
-          image: public.ecr.aws/aws-cli/aws-cli:2.36.24
-          imagePullPolicy: IfNotPresent
-          command:
-            - /bin/sh
-            - -c
-          args:
-            - "set -eu\nMODEL_URI=\"s3://${SBERT_S3_BUCKET}/${SBERT_S3_PREFIX}/\"\n\necho \"Downloading SBERT model from ${MODEL_URI}\"\nrm -rf /model/*\naws s3 sync \"${MODEL_URI}\" /model/ --only-show-errors\n\nif [ ! -f /model/modules.json ]; then\n  echo \"ERROR: /model/modules.json was not downloaded.\"\n  echo \"Expected S3 key: ${SBERT_S3_PREFIX}/modules.json\"\n  find /model -maxdepth 3 -type f | head -100 || true\n  exit 1\nfi\n\necho \"SBERT model download completed.\"\ndu -sh /model || true\n"
-          env:
-            - name: SBERT_S3_BUCKET
-              valueFrom:
-                configMapKeyRef:
-                  name: ai-config
-                  key: SBERT_S3_BUCKET
-            - name: SBERT_S3_PREFIX
-              valueFrom:
-                configMapKeyRef:
-                  name: ai-config
-                  key: SBERT_S3_PREFIX
-            - name: AWS_REGION
-              value: ap-northeast-2
-            - name: AWS_DEFAULT_REGION
-              value: ap-northeast-2
-          volumeMounts:
-            - name: sbert-model
-              mountPath: /model
-          resources:
-            requests:
-              cpu: 25m
-              memory: 64Mi
-            limits:
-              cpu: 250m
-              memory: 256Mi
+      - name: sbert-model-loader
+        image: public.ecr.aws/aws-cli/aws-cli:2.36.24
+        imagePullPolicy: IfNotPresent
+        command:
+        - /bin/sh
+        - -c
+        args:
+        - "set -eu\nMODEL_URI=\"s3://${SBERT_S3_BUCKET}/${SBERT_S3_PREFIX}/\"\n\n\
+          echo \"Downloading SBERT model from ${MODEL_URI}\"\nrm -rf /model/*\naws\
+          \ s3 sync \"${MODEL_URI}\" /model/ --only-show-errors\n\nif [ ! -f /model/modules.json\
+          \ ]; then\n  echo \"ERROR: /model/modules.json was not downloaded.\"\n \
+          \ echo \"Expected S3 key: ${SBERT_S3_PREFIX}/modules.json\"\n  find /model\
+          \ -maxdepth 3 -type f | head -100 || true\n  exit 1\nfi\n\necho \"SBERT\
+          \ model download completed.\"\ndu -sh /model || true\n"
+        env:
+        - name: SBERT_S3_BUCKET
+          valueFrom:
+            configMapKeyRef:
+              name: ai-config
+              key: SBERT_S3_BUCKET
+        - name: SBERT_S3_PREFIX
+          valueFrom:
+            configMapKeyRef:
+              name: ai-config
+              key: SBERT_S3_PREFIX
+        - name: AWS_REGION
+          value: ap-northeast-2
+        - name: AWS_DEFAULT_REGION
+          value: ap-northeast-2
+        volumeMounts:
+        - name: sbert-model
+          mountPath: /model
+        resources:
+          requests:
+            cpu: 25m
+            memory: 64Mi
+          limits:
+            cpu: 250m
+            memory: 512Mi
       volumes:
         - name: sbert-model
           emptyDir: {}
