@@ -157,7 +157,7 @@ spec:
             memory: 64Mi
           limits:
             cpu: 250m
-            memory: 512Mi
+            memory: 256Mi
       volumes:
         - name: sbert-model
           emptyDir: {}
