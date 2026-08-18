@@ -17,6 +17,7 @@ spec:
     spec:
       serviceAccountName: ai-service-account
       containers:
+<<<<<<< HEAD
       - name: ai-container
         image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-ai:82f2b20
         imagePullPolicy: IfNotPresent
@@ -105,3 +106,85 @@ spec:
     rollingUpdate:
       maxSurge: 0
       maxUnavailable: 1
+=======
+        - name: ai-container
+          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-ai:82f2b20
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          env:
+            - name: SERVER_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: SERVER_PORT
+            - name: APP_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: APP_ENV
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_NAME
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: DB_PASSWORD
+            # 현재 AI DB 코드 호환 alias.
+            # GitHub/Kubernetes Secret 이름은 DB_USERNAME/DB_PASSWORD로 유지한다.
+            - name: DB_USER
+              value: "$(DB_USERNAME)"
+            - name: DB_PASS
+              value: "$(DB_PASSWORD)"
+            # Amazon RDS PostgreSQL SSL 연결 강제
+            - name: PGSSLMODE
+              value: "require"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ai-secret
+                  key: OPENAI_API_KEY
+                  optional: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 40
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+>>>>>>> origin/main
