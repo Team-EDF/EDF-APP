@@ -8,6 +8,11 @@ on:
         required: true
         default: false
         type: boolean
+      install_observability:
+        description: "Metrics Server + Prometheus 모니터링 설치 (첫 배포에서는 false 권장)"
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: edf-platform-bootstrap
@@ -36,6 +41,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Validate required bootstrap values
         env:
@@ -125,18 +131,38 @@ jobs:
             --region "${AWS_REGION}" \
             --name "${EKS_CLUSTER_NAME}"
 
-      - name: Verify EKS access
+      - name: Verify EKS access and worker readiness
         shell: bash
         run: |
           set -euo pipefail
 
           kubectl cluster-info
-          kubectl get nodes -o wide
+          kubectl get nodes -L node.kubernetes.io/instance-type
+          kubectl get nodes \
+            -o custom-columns='NAME:.metadata.name,TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,READY:.status.conditions[?(@.type=="Ready")].status,POD_CAPACITY:.status.capacity.pods'
 
           if [[ "$(kubectl auth can-i create namespace)" != "yes" ]]; then
             echo "::error::The GitHub Actions role does not have sufficient EKS permissions."
             exit 1
           fi
+
+          TOTAL_NODES="$(kubectl get nodes --no-headers | wc -l | tr -d ' ')"
+          READY_NODES="$(kubectl get nodes --no-headers | awk '$2 == "Ready" {count++} END {print count+0}')"
+
+          echo "Ready worker nodes: ${READY_NODES}/${TOTAL_NODES}"
+
+          # First-deploy profile expects two fixed workers. Fail early instead of
+          # spending 10 minutes in an application rollout that cannot schedule.
+          if [[ "${READY_NODES}" -lt 2 || "${READY_NODES}" -ne "${TOTAL_NODES}" ]]; then
+            echo "::error::All worker nodes must be Ready and at least two Ready nodes are required before bootstrap."
+            kubectl get nodes -o wide
+            exit 1
+          fi
+
+          # CNI must be healthy before application Pods are created.
+          kubectl rollout status daemonset/aws-node \
+            -n kube-system \
+            --timeout=5m
 
       - name: Resolve EKS VPC and validate ALB subnets
         shell: bash
@@ -176,21 +202,59 @@ jobs:
             exit 1
           fi
 
-      - name: Create platform namespaces
+      - name: Create required platform namespaces
         shell: bash
         run: |
           set -euo pipefail
 
-          for namespace in \
-            "${EDF_NAMESPACE}" \
-            "${ARGOCD_NAMESPACE}" \
-            "${MONITORING_NAMESPACE}"; do
+          for namespace in "${EDF_NAMESPACE}" "${ARGOCD_NAMESPACE}"; do
             kubectl create namespace "${namespace}" \
               --dry-run=client \
               -o yaml | kubectl apply -f -
           done
 
-      - name: Install Metrics Server
+          if [[ "${{ inputs.install_observability }}" == "true" ]]; then
+            kubectl create namespace "${MONITORING_NAMESPACE}" \
+              --dry-run=client \
+              -o yaml | kubectl apply -f -
+          fi
+
+      - name: Remove observability workloads for lean first deploy
+        if: ${{ inputs.install_observability != true }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # These workloads are useful later, but are not required for the first
+          # server deployment. Removing them frees Pod/IP slots and memory.
+          helm uninstall monitoring \
+            -n "${MONITORING_NAMESPACE}" \
+            --ignore-not-found || true
+
+          kubectl delete deployment metrics-server \
+            -n kube-system \
+            --ignore-not-found=true || true
+
+          # Remove the standalone kube-state-metrics Deployment previously
+          # installed by bootstrap. kube-prometheus-stack provides its own copy
+          # when observability is enabled.
+          KSM_NAMESPACE="$(
+            kubectl get deployment -A \
+              -o jsonpath='{range .items[?(@.metadata.name=="kube-state-metrics")]}{.metadata.namespace}{"\n"}{end}' \
+              2>/dev/null | head -n 1
+          )"
+          if [[ -n "${KSM_NAMESPACE}" ]]; then
+            kubectl delete deployment kube-state-metrics \
+              -n "${KSM_NAMESPACE}" \
+              --ignore-not-found=true || true
+          fi
+
+          kubectl delete namespace "${MONITORING_NAMESPACE}" \
+            --ignore-not-found=true \
+            --wait=false || true
+
+      - name: Install Metrics Server for optional observability
+        if: ${{ inputs.install_observability == true }}
         shell: bash
         run: |
           set -euo pipefail
@@ -201,14 +265,6 @@ jobs:
           kubectl rollout status deployment/metrics-server \
             -n kube-system \
             --timeout=5m
-
-      - name: Install kube-state-metrics
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          kubectl apply -k \
-            https://github.com/kubernetes/kube-state-metrics/examples/standard
 
       - name: Verify AWS Load Balancer Controller service account
         shell: bash
@@ -276,6 +332,7 @@ jobs:
             --set serviceAccount.name=aws-load-balancer-controller \
             --set region="${AWS_REGION}" \
             --set vpcId="${VPC_ID}" \
+            --set replicaCount=1 \
             --set keepTLSSecret="${KEEP_TLS_SECRET}" \
             --atomic \
             --wait \
@@ -505,7 +562,8 @@ jobs:
             argocd.argoproj.io/secret-type=repository \
             --overwrite
 
-      - name: Install monitoring stack
+      - name: Install optional monitoring stack
+        if: ${{ inputs.install_observability == true }}
         shell: bash
         run: |
           set -euo pipefail
@@ -616,20 +674,28 @@ jobs:
           set -euo pipefail
 
           echo '=== Namespaces ==='
-          kubectl get namespace \
-            "${EDF_NAMESPACE}" \
-            "${ARGOCD_NAMESPACE}" \
-            "${MONITORING_NAMESPACE}"
+          kubectl get namespace "${EDF_NAMESPACE}" "${ARGOCD_NAMESPACE}"
+          if [[ "${{ inputs.install_observability }}" == "true" ]]; then
+            kubectl get namespace "${MONITORING_NAMESPACE}"
+          fi
 
           echo '=== Cluster add-ons ==='
           kubectl get deployment \
             -n kube-system \
-            metrics-server \
             aws-load-balancer-controller
 
-          echo '=== ArgoCD applications ==='
+          if [[ "${{ inputs.install_observability }}" == "true" ]]; then
+            kubectl get deployment -n kube-system metrics-server
+          fi
+
+          echo '=== ArgoCD ==='
+          kubectl get deployment argocd-server argocd-repo-server \
+            -n "${ARGOCD_NAMESPACE}"
           kubectl get applications.argoproj.io \
             -n "${ARGOCD_NAMESPACE}"
+
+          echo '=== EDF workload ==='
+          kubectl get pods -n "${EDF_NAMESPACE}" -o wide || true
 
           echo '=== Network ==='
           echo "EKS VPC: ${VPC_ID}"
