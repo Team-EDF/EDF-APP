@@ -4,5 +4,10 @@ metadata:
   name: ai-config
   namespace: edf
 data:
-  SERVER_PORT: "8000"
-  APP_ENV: "dev"
+  SERVER_PORT: '8000'
+  APP_ENV: prod
+  SBERT_S3_BUCKET: edf-user-uploads-edf-398875891485
+  SBERT_S3_PREFIX: models/greenstep_sbert_v2
+  SBERT_MODEL_PATH: /app/app/services/greenstep_sbert_v2
+  S3_BUCKET_NAME: edf-user-uploads-edf-398875891485
+  S3_UPLOAD_PREFIX: receipts
