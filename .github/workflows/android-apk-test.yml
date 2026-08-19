@@ -20,6 +20,9 @@ env:
   NODE_VERSION: "22.11.0"
   JAVA_VERSION: "17"
   FE_DIR: frontend/EDF-FE
+  ANDROID_PLATFORM: "android-36"
+  ANDROID_BUILD_TOOLS: "36.0.0"
+  ANDROID_NDK: "27.1.12297006"
 
 jobs:
   build-test-apk:
@@ -32,22 +35,27 @@ jobs:
         with:
           fetch-depth: 1
           submodules: false
-      
+
       - name: Resolve integrated EDF-FE commit
         id: fe_ref
         shell: bash
         run: |
           set -euo pipefail
 
-          FE_COMMIT="$(git ls-tree HEAD frontend/EDF-FE | awk '{print $3}')"
+          APP_COMMIT="$(git rev-parse HEAD)"
+          FE_COMMIT="$(git ls-tree HEAD "${FE_DIR}" | awk '{print $3}')"
 
           if [[ -z "${FE_COMMIT}" ]]; then
-            echo "::error::Could not resolve frontend/EDF-FE submodule commit."
+            echo "::error::Could not resolve ${FE_DIR} submodule commit from EDF-APP."
             exit 1
           fi
 
+          echo "APP_COMMIT=${APP_COMMIT}" >> "${GITHUB_ENV}"
+          echo "EXPECTED_FE_COMMIT=${FE_COMMIT}" >> "${GITHUB_ENV}"
           echo "commit=${FE_COMMIT}" >> "${GITHUB_OUTPUT}"
-          echo "EDF-FE commit: ${FE_COMMIT}"
+
+          echo "EDF-APP commit: ${APP_COMMIT}"
+          echo "EDF-FE commit : ${FE_COMMIT}"
 
       - name: Checkout EDF-FE
         uses: actions/checkout@v6
@@ -56,15 +64,16 @@ jobs:
           ref: ${{ steps.fe_ref.outputs.commit }}
           path: frontend/EDF-FE
           fetch-depth: 1
-          token: ${{ secrets.GH_PAT }}    
+          token: ${{ secrets.GH_PAT }}
+          persist-credentials: false
 
-      - name: Validate integrated frontend
+      - name: Validate EDF-FE source
         shell: bash
         run: |
           set -euo pipefail
 
           test -d "${FE_DIR}" || {
-            echo "::error::${FE_DIR} submodule directory was not found."
+            echo "::error::${FE_DIR} directory was not found."
             exit 1
           }
 
@@ -73,6 +82,7 @@ jobs:
             "${FE_DIR}/package-lock.json"
             "${FE_DIR}/scripts/sync-env.js"
             "${FE_DIR}/android/gradlew"
+            "${FE_DIR}/android/build.gradle"
             "${FE_DIR}/android/app/build.gradle"
             "${FE_DIR}/android/app/src/main/AndroidManifest.xml"
           )
@@ -84,8 +94,15 @@ jobs:
             }
           done
 
-          echo "APP_COMMIT=$(git rev-parse HEAD)" >> "${GITHUB_ENV}"
-          echo "FE_COMMIT=$(git -C "${FE_DIR}" rev-parse HEAD)" >> "${GITHUB_ENV}"
+          FE_COMMIT="$(git -C "${FE_DIR}" rev-parse HEAD)"
+
+          if [[ "${FE_COMMIT}" != "${EXPECTED_FE_COMMIT}" ]]; then
+            echo "::error::Checked out EDF-FE commit (${FE_COMMIT}) does not match EDF-APP submodule commit (${EXPECTED_FE_COMMIT})."
+            exit 1
+          fi
+
+          echo "FE_COMMIT=${FE_COMMIT}" >> "${GITHUB_ENV}"
+          echo "Integrated EDF-FE commit verified: ${FE_COMMIT}"
 
       - name: Validate test environment values
         env:
@@ -93,7 +110,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-          KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
+          KAKAO_APP_KEY: ${{ secrets.KAKAO_APP_KEY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -134,22 +151,48 @@ jobs:
       - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Ensure Android SDK packages
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          cmdline-tools-version: "14742923"
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: false
+          packages: >-
+            platform-tools
+            platforms;${{ env.ANDROID_PLATFORM }}
+            build-tools;${{ env.ANDROID_BUILD_TOOLS }}
+            ndk;${{ env.ANDROID_NDK }}
+
+      - name: Verify Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
 
-          if ! command -v sdkmanager >/dev/null 2>&1; then
-            echo "::error::sdkmanager is not available on this GitHub runner."
+          command -v sdkmanager >/dev/null 2>&1 || {
+            echo "::error::sdkmanager is still unavailable after android-actions/setup-android."
             exit 1
-          fi
+          }
 
-          yes | sdkmanager --licenses >/dev/null 2>&1 || true
+          echo "sdkmanager: $(command -v sdkmanager)"
+          sdkmanager --version
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-}"
 
-          sdkmanager \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "ndk;27.1.12297006"
+          test -d "${ANDROID_SDK_ROOT}/platforms/${ANDROID_PLATFORM}" || {
+            echo "::error::Android platform ${ANDROID_PLATFORM} was not installed."
+            exit 1
+          }
+
+          test -d "${ANDROID_SDK_ROOT}/build-tools/${ANDROID_BUILD_TOOLS}" || {
+            echo "::error::Android build-tools ${ANDROID_BUILD_TOOLS} were not installed."
+            exit 1
+          }
+
+          test -d "${ANDROID_SDK_ROOT}/ndk/${ANDROID_NDK}" || {
+            echo "::error::Android NDK ${ANDROID_NDK} was not installed."
+            exit 1
+          }
+
+          echo "Android SDK/Build Tools/NDK: OK"
 
       - name: Install frontend dependencies
         working-directory: frontend/EDF-FE
@@ -165,7 +208,7 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-          KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
+          KAKAO_APP_KEY: ${{ secrets.KAKAO_APP_KEY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -193,12 +236,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          # EDF-FE 자체에 포함된 공식 동기화 스크립트를 실행합니다.
-          # Kakao/Google 설정을 Android/iOS native 설정에 반영합니다.
           node scripts/sync-env.js
 
-      - name: Resolve current Android manifest placeholder
+      - name: Resolve Android cleartext manifest placeholder
         working-directory: frontend/EDF-FE
         env:
           ANDROID_CLEARTEXT: ${{ env.ANDROID_CLEARTEXT }}
@@ -206,11 +246,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-
-          # 현재 EDF-FE는 ${usesCleartextTraffic} placeholder를 선언하지만
-          # build.gradle에서 manifestPlaceholders 값을 제공하지 않습니다.
-          # 1차 APK 테스트를 위해 GitHub runner의 작업 사본에서만 값을 치환합니다.
           python3 - <<'PY'
           from pathlib import Path
           import os
@@ -225,7 +260,7 @@ jobs:
               path.write_text(text, encoding="utf-8")
               print(f"Resolved usesCleartextTraffic={value}")
           else:
-              print("usesCleartextTraffic placeholder is already resolved by EDF-FE; no CI patch needed.")
+              print("usesCleartextTraffic placeholder is already resolved; no CI patch needed.")
           PY
 
       - name: Build standalone Release APK
@@ -284,7 +319,7 @@ jobs:
             echo "## GreenStep APK Build"
             echo ""
             echo "- EDF-APP commit: \`${APP_COMMIT:-unknown}\`"
-            echo "- EDF-FE submodule commit: \`${FE_COMMIT:-unknown}\`"
+            echo "- EDF-FE commit: \`${FE_COMMIT:-unknown}\`"
             echo "- API URL: \`${{ vars.ANDROID_BASE_URL }}\`"
             echo "- Build: \`assembleRelease\`"
             echo "- APK: \`${APK_OUTPUT_NAME:-build failed}\`"
