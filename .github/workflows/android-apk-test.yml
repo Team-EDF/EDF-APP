@@ -106,7 +106,7 @@ jobs:
 
       - name: Validate test environment values
         env:
-          ANDROID_BASE_URL: ${{ vars.ANDROID_BASE_URL }}
+          BASE_URL: ${{ secrets.BASE_URL }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
@@ -116,7 +116,7 @@ jobs:
           set -euo pipefail
 
           required_names=(
-            ANDROID_BASE_URL
+            BASE_URL
             GOOGLE_CLIENT_ID
             NAVER_CLIENT_ID
             NAVER_CLIENT_SECRET
@@ -125,13 +125,13 @@ jobs:
 
           for name in "${required_names[@]}"; do
             if [[ -z "${!name:-}" ]]; then
-              echo "::error::Required GitHub Secret/Variable is missing: ${name}"
+              echo "::error::Required GitHub Secret is missing: ${name}"
               exit 1
             fi
           done
 
-          if [[ ! "${ANDROID_BASE_URL}" =~ ^https?:// ]]; then
-            echo "::error::ANDROID_BASE_URL must start with http:// or https://"
+          if [[ ! "${BASE_URL}" =~ ^https?:// ]]; then
+            echo "::error::BASE_URL must start with http:// or https://"
             exit 1
           fi
 
@@ -204,7 +204,7 @@ jobs:
       - name: Create EDF-FE test environment
         working-directory: frontend/EDF-FE
         env:
-          ANDROID_BASE_URL: ${{ vars.ANDROID_BASE_URL }}
+          BASE_URL: ${{ secrets.BASE_URL }}
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
@@ -214,7 +214,7 @@ jobs:
           set -euo pipefail
 
           cat > .env <<EOF
-          BASE_URL=${ANDROID_BASE_URL}
+          BASE_URL=${BASE_URL}
           GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
           NAVER_APP_NAME=GreenStep
           NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
@@ -225,7 +225,7 @@ jobs:
 
           chmod 600 .env
 
-          if [[ "${ANDROID_BASE_URL}" == https://* ]]; then
+          if [[ "${BASE_URL}" == https://* ]]; then
             echo "ANDROID_CLEARTEXT=false" >> "${GITHUB_ENV}"
           else
             echo "ANDROID_CLEARTEXT=true" >> "${GITHUB_ENV}"
@@ -320,7 +320,7 @@ jobs:
             echo ""
             echo "- EDF-APP commit: \`${APP_COMMIT:-unknown}\`"
             echo "- EDF-FE commit: \`${FE_COMMIT:-unknown}\`"
-            echo "- API URL: \`${{ vars.ANDROID_BASE_URL }}\`"
+            echo "- API URL: configured from GitHub Secret BASE_URL"
             echo "- Build: \`assembleRelease\`"
             echo "- APK: \`${APK_OUTPUT_NAME:-build failed}\`"
             echo ""
