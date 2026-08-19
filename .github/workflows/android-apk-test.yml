@@ -27,12 +27,36 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout EDF-APP with submodules
+      - name: Checkout EDF-APP
         uses: actions/checkout@v6
         with:
           fetch-depth: 1
-          submodules: recursive
-          token: ${{ secrets.GH_PAT }}
+          submodules: false
+      
+      - name: Resolve integrated EDF-FE commit
+        id: fe_ref
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          FE_COMMIT="$(git ls-tree HEAD frontend/EDF-FE | awk '{print $3}')"
+
+          if [[ -z "${FE_COMMIT}" ]]; then
+            echo "::error::Could not resolve frontend/EDF-FE submodule commit."
+            exit 1
+          fi
+
+          echo "commit=${FE_COMMIT}" >> "${GITHUB_OUTPUT}"
+          echo "EDF-FE commit: ${FE_COMMIT}"
+
+      - name: Checkout EDF-FE
+        uses: actions/checkout@v6
+        with:
+          repository: Team-EDF/EDF-FE
+          ref: ${{ steps.fe_ref.outputs.commit }}
+          path: frontend/EDF-FE
+          fetch-depth: 1
+          token: ${{ secrets.GH_PAT }}    
 
       - name: Validate integrated frontend
         shell: bash
