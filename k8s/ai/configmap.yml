@@ -11,3 +11,6 @@ data:
   SBERT_MODEL_PATH: /app/app/services/greenstep_sbert_v2
   S3_BUCKET_NAME: edf-user-uploads-edf-398875891485
   S3_UPLOAD_PREFIX: receipts
+  GEMINI_PROJECT_ID: carbon-ocr-platform-504610
+  GEMINI_LOCATION: us-central1
+  GOOGLE_CLOUD_PROJECT: carbon-ocr-platform-504610

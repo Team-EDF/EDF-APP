@@ -27,6 +27,8 @@ env:
   ARGOCD_NAMESPACE: argocd
   MONITORING_NAMESPACE: monitoring
   EDF_INGRESS_NAME: edf-api-ingress
+  GCP_PROJECT_ID: carbon-ocr-platform-504610
+  GCP_SERVICE_ACCOUNT_EMAIL: ocr-service@carbon-ocr-platform-504610.iam.gserviceaccount.com
 
 jobs:
   bootstrap:
@@ -70,6 +72,7 @@ jobs:
           KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
 
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON }}
 
           GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_USERNAME: ${{ vars.USER_NAME }}
@@ -98,6 +101,7 @@ jobs:
             GOOGLE_API_KEY
             KAKAO_API_KEY
             OPENAI_API_KEY
+            GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON
             GH_PAT
             GITHUB_USERNAME
             GITOPS_REPOSITORY
@@ -537,6 +541,60 @@ jobs:
             --from-literal=OPENAI_API_KEY="${OPENAI_API_KEY}" \
             --dry-run=client \
             -o yaml | kubectl apply -f -
+
+      - name: Create Google Cloud credentials Secret for AI
+        env:
+          GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON }}
+
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CREDENTIAL_FILE="${RUNNER_TEMP}/google-service-account.json"
+
+          # Never print the credential JSON. Write it directly from GitHub Secrets.
+          printf '%s' "${GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON}" > "${CREDENTIAL_FILE}"
+          chmod 600 "${CREDENTIAL_FILE}"
+
+          python - "${CREDENTIAL_FILE}" "${GCP_PROJECT_ID}" "${GCP_SERVICE_ACCOUNT_EMAIL}" <<'PY'
+          import json
+          import sys
+
+          path, expected_project, expected_email = sys.argv[1:4]
+
+          with open(path, "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          if data.get("type") != "service_account":
+              raise SystemExit("Credential JSON type is not 'service_account'.")
+
+          if data.get("project_id") != expected_project:
+              raise SystemExit(
+                  f"Credential project_id mismatch: {data.get('project_id')!r}"
+              )
+
+          if data.get("client_email") != expected_email:
+              raise SystemExit(
+                  f"Credential client_email mismatch: {data.get('client_email')!r}"
+              )
+
+          if not data.get("private_key"):
+              raise SystemExit("Credential JSON does not contain private_key.")
+
+          print("Google service-account JSON validation: OK")
+          print(f"project_id={expected_project}")
+          print(f"client_email={expected_email}")
+          PY
+
+          kubectl create secret generic ai-google-credentials \
+            --namespace "${EDF_NAMESPACE}" \
+            --from-file=google-service-account.json="${CREDENTIAL_FILE}" \
+            --dry-run=client \
+            -o yaml | kubectl apply -f -
+
+          rm -f "${CREDENTIAL_FILE}"
+
+          echo "AI Google credentials Kubernetes Secret: OK"
 
       - name: Create ArgoCD repository Secret
         env:
