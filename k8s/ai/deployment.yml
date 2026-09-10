@@ -18,7 +18,7 @@ spec:
       serviceAccountName: ai-service-account
       containers:
         - name: ai-container
-          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-ai:7ba7d0d
+          image: 398875891485.dkr.ecr.ap-northeast-2.amazonaws.com/edf-ai:f7835df
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
