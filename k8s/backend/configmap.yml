@@ -18,6 +18,6 @@ data:
 
   # Private S3 user-upload configuration
   AWS_REGION: "ap-northeast-2"
-  S3_BUCKET_NAME: "edf-user-uploads-edf-398875891485"
+  S3_BUCKET_NAME: "edf-user-uploads-edf-556988669310"
   S3_UPLOAD_PREFIX: "receipts"
 
