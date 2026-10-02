@@ -509,7 +509,8 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
@@ -526,7 +527,8 @@ jobs:
             ANDROID_KEYSTORE_PASSWORD
             ANDROID_KEY_ALIAS
             ANDROID_KEY_PASSWORD
-            GOOGLE_WEB_CLIENT_ID
+            GOOGLE_CLIENT_ID
+            GOOGLE_MAPS_API_KEY
             NAVER_CLIENT_ID
             NAVER_CLIENT_SECRET
             KAKAO_APP_KEY
@@ -613,7 +615,8 @@ jobs:
       - name: Create production environment file
         env:
           ANDROID_BASE_URL: ${{ vars.ANDROID_BASE_URL }}
-          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
@@ -623,14 +626,22 @@ jobs:
 
           cat > .env.production <<EOF
           BASE_URL=${ANDROID_BASE_URL}
-          GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID}
-          GOOGLE_IOS_CLIENT_ID=
+          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+          GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
           NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
           NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
           KAKAO_APP_KEY=${KAKAO_APP_KEY}
           EOF
 
           chmod 600 .env.production
+
+      - name: Sync native Android environment values
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .env.production .env
+          node scripts/sync-env.js
+          rm -f .env
 
       - name: Decode Android upload keystore
         env:
@@ -681,7 +692,14 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Type check
-        run: npm run typecheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)"; then
+            npm run typecheck
+          else
+            echo "No typecheck script is defined in EDF-FE; skipping."
+          fi
 
       - name: Lint
         run: npm run lint

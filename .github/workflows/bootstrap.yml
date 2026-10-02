@@ -71,6 +71,14 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
 
+          COOLSMS_API_KEY: ${{ secrets.COOLSMS_API_KEY }}
+          COOLSMS_API_SECRET: ${{ secrets.COOLSMS_API_SECRET }}
+          COOLSMS_SENDER: ${{ secrets.COOLSMS_SENDER }}
+
+          NAVER_API_HUB_CLIENT_ID: ${{ secrets.NAVER_API_HUB_CLIENT_ID }}
+          NAVER_API_HUB_CLIENT_SECRET: ${{ secrets.NAVER_API_HUB_CLIENT_SECRET }}
+          NAVER_NEWS_API_URL: ${{ secrets.NAVER_NEWS_API_URL }}
+
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON }}
 
@@ -100,6 +108,9 @@ jobs:
             KAKAO_CLIENT_SECRET
             GOOGLE_API_KEY
             KAKAO_API_KEY
+            COOLSMS_API_KEY
+            COOLSMS_API_SECRET
+            COOLSMS_SENDER
             OPENAI_API_KEY
             GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON
             GH_PAT
@@ -493,6 +504,15 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
 
+          COOLSMS_API_KEY: ${{ secrets.COOLSMS_API_KEY }}
+          COOLSMS_API_SECRET: ${{ secrets.COOLSMS_API_SECRET }}
+          COOLSMS_SENDER: ${{ secrets.COOLSMS_SENDER }}
+
+          # Optional. If these stay empty, the backend skips Naver News collection.
+          NAVER_API_HUB_CLIENT_ID: ${{ secrets.NAVER_API_HUB_CLIENT_ID }}
+          NAVER_API_HUB_CLIENT_SECRET: ${{ secrets.NAVER_API_HUB_CLIENT_SECRET }}
+          NAVER_NEWS_API_URL: ${{ secrets.NAVER_NEWS_API_URL }}
+
         shell: bash
         run: |
           set -euo pipefail
@@ -515,6 +535,12 @@ jobs:
             --from-literal=KAKAO_CLIENT_SECRET="${KAKAO_CLIENT_SECRET}" \
             --from-literal=GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
             --from-literal=KAKAO_API_KEY="${KAKAO_API_KEY}" \
+            --from-literal=COOLSMS_API_KEY="${COOLSMS_API_KEY}" \
+            --from-literal=COOLSMS_API_SECRET="${COOLSMS_API_SECRET}" \
+            --from-literal=COOLSMS_SENDER="${COOLSMS_SENDER}" \
+            --from-literal=NAVER_API_HUB_CLIENT_ID="${NAVER_API_HUB_CLIENT_ID}" \
+            --from-literal=NAVER_API_HUB_CLIENT_SECRET="${NAVER_API_HUB_CLIENT_SECRET}" \
+            --from-literal=NAVER_NEWS_API_URL="${NAVER_NEWS_API_URL}" \
             --dry-run=client \
             -o yaml | kubectl apply -f -
 
