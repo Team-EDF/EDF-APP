@@ -7,7 +7,8 @@ metadata:
     alb.ingress.kubernetes.io/load-balancer-name: edf-dev-api-alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80}]'
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
     alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
     alb.ingress.kubernetes.io/healthcheck-port: traffic-port
     alb.ingress.kubernetes.io/healthcheck-path: /actuator/health/readiness
@@ -15,7 +16,8 @@ metadata:
 spec:
   ingressClassName: alb
   rules:
-  - http:
+  - host: api.aws-woo.click
+    http:
       paths:
       - path: /
         pathType: Prefix
