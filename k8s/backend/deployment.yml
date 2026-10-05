@@ -22,7 +22,7 @@ spec:
       serviceAccountName: backend-service-account
       containers:
         - name: backend-container
-          image: 556988669310.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:48067eb
+          image: 556988669310.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:fd8e6a7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
