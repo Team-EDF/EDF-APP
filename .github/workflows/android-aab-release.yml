@@ -1,0 +1,221 @@
+name: Build GreenStep Play AAB
+
+on:
+  workflow_dispatch:
+    inputs:
+      frontend_ref:
+        description: "EDF-FE branch/tag/commit to build"
+        required: true
+        default: "main"
+      version_name:
+        description: "Android versionName"
+        required: true
+        default: "1.0.0"
+      version_code:
+        description: "Android versionCode"
+        required: true
+        default: "1"
+
+permissions:
+  contents: read
+
+jobs:
+  build-play-aab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      ANDROID_VERSION_NAME: ${{ inputs.version_name }}
+      ANDROID_VERSION_CODE: ${{ inputs.version_code }}
+
+    steps:
+      - name: Checkout EDF-APP
+        uses: actions/checkout@v4
+
+      - name: Checkout EDF-FE
+        uses: actions/checkout@v4
+        with:
+          repository: Team-EDF/EDF-FE
+          ref: ${{ inputs.frontend_ref }}
+          token: ${{ secrets.GH_PAT }}
+          path: frontend/EDF-FE
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/EDF-FE/package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.1.12297006"
+
+      - name: Validate release configuration
+        shell: bash
+        env:
+          BASE_URL: ${{ vars.ANDROID_BASE_URL }}
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          KAKAO_NATIVE_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${BASE_URL:-}" != https://* ]]; then
+            echo "::error::ANDROID_BASE_URL must use HTTPS"
+            exit 1
+          fi
+
+          if ! [[ "${ANDROID_VERSION_CODE}" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::version_code must be a positive integer"
+            exit 1
+          fi
+
+          for name in \
+            KEYSTORE_B64 \
+            KEYSTORE_PASSWORD \
+            KEY_ALIAS \
+            KEY_PASSWORD \
+            GOOGLE_CLIENT_ID \
+            GOOGLE_MAPS_API_KEY \
+            NAVER_CLIENT_ID \
+            NAVER_CLIENT_SECRET \
+            KAKAO_NATIVE_APP_KEY
+          do
+            test -n "${!name:-}" || {
+              echo "::error::Missing release secret: ${name}"
+              exit 1
+            }
+          done
+
+      - name: Install dependencies
+        working-directory: frontend/EDF-FE
+        run: npm ci
+
+      - name: Create production environment
+        working-directory: frontend/EDF-FE
+        shell: bash
+        env:
+          BASE_URL: ${{ vars.ANDROID_BASE_URL }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          KAKAO_NATIVE_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
+        run: |
+          cat > .env.production <<EOF
+          BASE_URL=${BASE_URL}
+          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+          GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+          NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
+          NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
+          KAKAO_NATIVE_APP_KEY=${KAKAO_NATIVE_APP_KEY}
+          KAKAO_APP_KEY=${KAKAO_NATIVE_APP_KEY}
+          EOF
+          cp .env.production .env
+
+      - name: Sync native Android environment
+        working-directory: frontend/EDF-FE
+        shell: bash
+        run: |
+          test -f scripts/sync-env.js
+          node scripts/sync-env.js
+
+      - name: Restore upload keystore
+        working-directory: frontend/EDF-FE
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          printf '%s' "${KEYSTORE_B64}" | base64 --decode > android/app/greenstep-upload.jks
+          test -s android/app/greenstep-upload.jks
+
+      - name: Verify upload keystore
+        working-directory: frontend/EDF-FE
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          keytool -list \
+            -keystore android/app/greenstep-upload.jks \
+            -storepass "${KEYSTORE_PASSWORD}" \
+            -alias "${KEY_ALIAS}" \
+            >/dev/null
+
+      - name: Build signed AAB
+        working-directory: frontend/EDF-FE/android
+        shell: bash
+        env:
+          ENVFILE: .env.production
+          ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/frontend/EDF-FE/android/app/greenstep-upload.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          ANDROID_VERSION_NAME: ${{ inputs.version_name }}
+          ANDROID_VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          chmod +x gradlew
+          ./gradlew clean bundleRelease --no-daemon
+
+      - name: Verify AAB
+        shell: bash
+        run: |
+          AAB="frontend/EDF-FE/android/app/build/outputs/bundle/release/app-release.aab"
+          test -f "$AAB"
+          ls -lh "$AAB"
+          sha256sum "$AAB" | tee greenstep-play-aab.sha256
+
+      - name: Export upload key fingerprints
+        working-directory: frontend/EDF-FE
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          keytool -list -v \
+            -keystore android/app/greenstep-upload.jks \
+            -storepass "${KEYSTORE_PASSWORD}" \
+            -alias "${KEY_ALIAS}" \
+            | grep -E "SHA1:|SHA256:" \
+            | tee "${GITHUB_WORKSPACE}/upload-key-fingerprints.txt"
+
+      - name: Upload AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: greenstep-play-aab-${{ inputs.version_name }}-${{ inputs.version_code }}
+          path: |
+            frontend/EDF-FE/android/app/build/outputs/bundle/release/app-release.aab
+            greenstep-play-aab.sha256
+            upload-key-fingerprints.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove keystore
+        if: always()
+        working-directory: frontend/EDF-FE
+        shell: bash
+        run: |
+          rm -f android/app/greenstep-upload.jks
