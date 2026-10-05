@@ -126,6 +126,8 @@ jobs:
           GH_PAT: ${{ secrets.GH_PAT }}
           GIT_USER_NAME: ${{ vars.USER_NAME }}
           GIT_USER_EMAIL: ${{ vars.USER_EMAIL }}
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
@@ -135,6 +137,8 @@ jobs:
             GH_PAT
             GIT_USER_NAME
             GIT_USER_EMAIL
+            ADMIN_EMAIL
+            ADMIN_PASSWORD
           )
 
           for name in "${required_names[@]}"; do
@@ -246,6 +250,34 @@ jobs:
 
           echo '=== Existing Pending Pods (informational) ==='
           kubectl get pods -A --field-selector=status.phase=Pending -o wide || true
+
+      - name: Sync Backend admin credentials
+        env:
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${ADMIN_EMAIL:-}" || -z "${ADMIN_PASSWORD:-}" ]]; then
+            echo "::error::ADMIN_EMAIL and ADMIN_PASSWORD GitHub Secrets are required."
+            exit 1
+          fi
+
+          if ! kubectl get secret backend-secret -n "${EDF_NAMESPACE}" >/dev/null 2>&1; then
+            echo "::error::backend-secret does not exist. Run bootstrap first."
+            exit 1
+          fi
+
+          ADMIN_EMAIL_B64="$(printf '%s' "${ADMIN_EMAIL}" | base64 -w 0)"
+          ADMIN_PASSWORD_B64="$(printf '%s' "${ADMIN_PASSWORD}" | base64 -w 0)"
+
+          kubectl patch secret backend-secret \
+            -n "${EDF_NAMESPACE}" \
+            --type merge \
+            --patch "{\"data\":{\"ADMIN_EMAIL\":\"${ADMIN_EMAIL_B64}\",\"ADMIN_PASSWORD\":\"${ADMIN_PASSWORD_B64}\"}}"
+
+          echo "Backend admin credentials synchronized to backend-secret."
 
       - name: Resolve and validate ECR
         shell: bash
@@ -509,11 +541,10 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
-          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           PUBLISH_ANDROID: ${{ inputs.publish_android }}
         shell: bash
@@ -527,8 +558,7 @@ jobs:
             ANDROID_KEYSTORE_PASSWORD
             ANDROID_KEY_ALIAS
             ANDROID_KEY_PASSWORD
-            GOOGLE_CLIENT_ID
-            GOOGLE_MAPS_API_KEY
+            GOOGLE_WEB_CLIENT_ID
             NAVER_CLIENT_ID
             NAVER_CLIENT_SECRET
             KAKAO_APP_KEY
@@ -606,15 +636,6 @@ jobs:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install required Android SDK packages
-        shell: bash
-        run: |
-          set -euo pipefail
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.1.12297006"
-
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
@@ -624,8 +645,7 @@ jobs:
       - name: Create production environment file
         env:
           ANDROID_BASE_URL: ${{ vars.ANDROID_BASE_URL }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
@@ -635,8 +655,8 @@ jobs:
 
           cat > .env.production <<EOF
           BASE_URL=${ANDROID_BASE_URL}
-          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-          GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
+          GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID}
+          GOOGLE_IOS_CLIENT_ID=
           NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
           NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
           KAKAO_APP_KEY=${KAKAO_APP_KEY}
@@ -692,23 +712,8 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
 
-      - name: Type check (when configured)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if node -e "const p=require('./package.json'); process.exit(p.scripts && p.scripts.typecheck ? 0 : 1)"; then
-            npm run typecheck
-          else
-            echo "No typecheck script configured; skipping."
-          fi
-
-      - name: Sync native Android configuration
-        env:
-          ENVFILE: .env.production
-        shell: bash
-        run: |
-          set -euo pipefail
-          node scripts/sync-env.js
+      - name: Type check
+        run: npm run typecheck
 
       - name: Lint
         run: npm run lint

@@ -22,7 +22,7 @@ spec:
       serviceAccountName: backend-service-account
       containers:
         - name: backend-container
-          image: 556988669310.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:fd8e6a7
+          image: 556988669310.dkr.ecr.ap-northeast-2.amazonaws.com/edf-backend:62666c8
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -67,6 +67,16 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: JWT_SECRET
+            - name: ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: ADMIN_EMAIL
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: ADMIN_PASSWORD
             - name: REDIS_HOST
               valueFrom:
                 configMapKeyRef:
@@ -152,39 +162,6 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: KAKAO_API_KEY
-            - name: COOLSMS_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: COOLSMS_API_KEY
-            - name: COOLSMS_API_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: COOLSMS_API_SECRET
-            - name: COOLSMS_SENDER
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: COOLSMS_SENDER
-            - name: NAVER_API_HUB_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: NAVER_API_HUB_CLIENT_ID
-                  optional: true
-            - name: NAVER_API_HUB_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: NAVER_API_HUB_CLIENT_SECRET
-                  optional: true
-            - name: NAVER_NEWS_API_URL
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: NAVER_NEWS_API_URL
-                  optional: true
             - name: JWT_ACCESS_EXP
               valueFrom:
                 configMapKeyRef:

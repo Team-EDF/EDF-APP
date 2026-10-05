@@ -56,6 +56,9 @@ jobs:
 
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
 
@@ -70,14 +73,6 @@ jobs:
 
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
-
-          COOLSMS_API_KEY: ${{ secrets.COOLSMS_API_KEY }}
-          COOLSMS_API_SECRET: ${{ secrets.COOLSMS_API_SECRET }}
-          COOLSMS_SENDER: ${{ secrets.COOLSMS_SENDER }}
-
-          NAVER_API_HUB_CLIENT_ID: ${{ secrets.NAVER_API_HUB_CLIENT_ID }}
-          NAVER_API_HUB_CLIENT_SECRET: ${{ secrets.NAVER_API_HUB_CLIENT_SECRET }}
-          NAVER_NEWS_API_URL: ${{ secrets.NAVER_NEWS_API_URL }}
 
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON }}
@@ -98,6 +93,8 @@ jobs:
             DB_USERNAME
             DB_PASSWORD
             JWT_SECRET
+            ADMIN_EMAIL
+            ADMIN_PASSWORD
             MAIL_USERNAME
             MAIL_APP_PASSWORD
             GOOGLE_CLIENT_ID
@@ -108,9 +105,6 @@ jobs:
             KAKAO_CLIENT_SECRET
             GOOGLE_API_KEY
             KAKAO_API_KEY
-            COOLSMS_API_KEY
-            COOLSMS_API_SECRET
-            COOLSMS_SENDER
             OPENAI_API_KEY
             GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON
             GH_PAT
@@ -489,6 +483,9 @@ jobs:
 
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
+          ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
 
@@ -504,15 +501,6 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
 
-          COOLSMS_API_KEY: ${{ secrets.COOLSMS_API_KEY }}
-          COOLSMS_API_SECRET: ${{ secrets.COOLSMS_API_SECRET }}
-          COOLSMS_SENDER: ${{ secrets.COOLSMS_SENDER }}
-
-          # Optional. If these stay empty, the backend skips Naver News collection.
-          NAVER_API_HUB_CLIENT_ID: ${{ secrets.NAVER_API_HUB_CLIENT_ID }}
-          NAVER_API_HUB_CLIENT_SECRET: ${{ secrets.NAVER_API_HUB_CLIENT_SECRET }}
-          NAVER_NEWS_API_URL: ${{ secrets.NAVER_NEWS_API_URL }}
-
         shell: bash
         run: |
           set -euo pipefail
@@ -525,6 +513,8 @@ jobs:
             --from-literal=DB_USERNAME="${DB_USERNAME}" \
             --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
             --from-literal=JWT_SECRET="${JWT_SECRET}" \
+            --from-literal=ADMIN_EMAIL="${ADMIN_EMAIL}" \
+            --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
             --from-literal=MAIL_USERNAME="${MAIL_USERNAME}" \
             --from-literal=MAIL_APP_PASSWORD="${MAIL_APP_PASSWORD}" \
             --from-literal=GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
@@ -535,12 +525,6 @@ jobs:
             --from-literal=KAKAO_CLIENT_SECRET="${KAKAO_CLIENT_SECRET}" \
             --from-literal=GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
             --from-literal=KAKAO_API_KEY="${KAKAO_API_KEY}" \
-            --from-literal=COOLSMS_API_KEY="${COOLSMS_API_KEY}" \
-            --from-literal=COOLSMS_API_SECRET="${COOLSMS_API_SECRET}" \
-            --from-literal=COOLSMS_SENDER="${COOLSMS_SENDER}" \
-            --from-literal=NAVER_API_HUB_CLIENT_ID="${NAVER_API_HUB_CLIENT_ID}" \
-            --from-literal=NAVER_API_HUB_CLIENT_SECRET="${NAVER_API_HUB_CLIENT_SECRET}" \
-            --from-literal=NAVER_NEWS_API_URL="${NAVER_NEWS_API_URL}" \
             --dry-run=client \
             -o yaml | kubectl apply -f -
 
