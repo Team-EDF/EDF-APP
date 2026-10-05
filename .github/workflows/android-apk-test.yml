@@ -1,4 +1,4 @@
-name: Build GreenStep Test APK
+name: Build GreenStep Standalone Test APK
 
 on:
   workflow_dispatch:
@@ -57,7 +57,7 @@ jobs:
             "build-tools;36.0.0" \
             "ndk;27.1.12297006"
 
-      - name: Validate environment
+      - name: Validate build environment
         shell: bash
         env:
           BASE_URL: ${{ vars.ANDROID_BASE_URL }}
@@ -68,10 +68,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -n "${BASE_URL:-}" || {
-            echo "::error::ANDROID_BASE_URL variable is missing"
+          if [[ -z "${BASE_URL:-}" ]]; then
+            echo "::error::Repository Variable ANDROID_BASE_URL is missing."
             exit 1
-          }
+          fi
+
+          if [[ "${BASE_URL}" != https://* ]]; then
+            echo "::error::Standalone test APK must use HTTPS. Current ANDROID_BASE_URL=${BASE_URL}"
+            exit 1
+          fi
 
           for name in \
             GOOGLE_CLIENT_ID \
@@ -79,17 +84,22 @@ jobs:
             NAVER_CLIENT_ID \
             NAVER_CLIENT_SECRET
           do
-            test -n "${!name:-}" || {
+            if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing secret: ${name}"
               exit 1
-            }
+            fi
           done
 
-      - name: Install dependencies
+          test -f frontend/EDF-FE/android/app/debug.keystore || {
+            echo "::error::android/app/debug.keystore was not found in EDF-FE."
+            exit 1
+          }
+
+      - name: Install frontend dependencies
         working-directory: frontend/EDF-FE
         run: npm ci
 
-      - name: Create test .env
+      - name: Create Android build environment
         working-directory: frontend/EDF-FE
         shell: bash
         env:
@@ -99,6 +109,7 @@ jobs:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: |
+          set -euo pipefail
           cat > .env <<EOF
           BASE_URL=${BASE_URL}
           GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
@@ -106,6 +117,9 @@ jobs:
           NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
           NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
           EOF
+
+          echo "Android environment file created."
+          echo "BASE_URL=${BASE_URL}"
 
       - name: Sync Android Google Maps key
         working-directory: frontend/EDF-FE
@@ -116,9 +130,13 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          import os, re
+          import os
+          import re
 
           path = Path("android/app/src/main/res/values/strings.xml")
+          if not path.exists():
+              raise SystemExit("android/app/src/main/res/values/strings.xml was not found")
+
           text = path.read_text(encoding="utf-8")
           key = os.environ["GOOGLE_MAPS_API_KEY"]
 
@@ -136,27 +154,62 @@ jobs:
           print("Android Google Maps API key synced.")
           PY
 
-      - name: Build debug APK
+      # IMPORTANT:
+      # This is intentionally a RELEASE variant so React Native embeds
+      # index.android.bundle inside the APK. A debug APK expects Metro and is
+      # not suitable as a standalone install from GitHub Actions.
+      # For this test-only APK we sign the release variant with the repository's
+      # standard Android debug keystore. Google Play AAB uses a separate upload key.
+      - name: Build standalone release APK
         working-directory: frontend/EDF-FE/android
         shell: bash
+        env:
+          ENVFILE: .env
+          ANDROID_KEYSTORE_FILE: ${{ github.workspace }}/frontend/EDF-FE/android/app/debug.keystore
+          ANDROID_KEYSTORE_PASSWORD: android
+          ANDROID_KEY_ALIAS: androiddebugkey
+          ANDROID_KEY_PASSWORD: android
+          ANDROID_VERSION_NAME: 1.0.0-test
+          ANDROID_VERSION_CODE: 1
         run: |
+          set -euo pipefail
           chmod +x gradlew
-          ./gradlew clean assembleDebug --no-daemon
+          ./gradlew clean assembleRelease --no-daemon
 
-      - name: Verify APK
+      - name: Verify standalone APK and embedded JS bundle
         shell: bash
         run: |
-          APK="frontend/EDF-FE/android/app/build/outputs/apk/debug/app-debug.apk"
-          test -f "$APK"
-          ls -lh "$APK"
-          sha256sum "$APK" | tee greenstep-test-apk.sha256
+          set -euo pipefail
 
-      - name: Upload test APK
+          APK="frontend/EDF-FE/android/app/build/outputs/apk/release/app-release.apk"
+          BUNDLE="frontend/EDF-FE/android/app/build/generated/assets/react/release/index.android.bundle"
+
+          test -f "$APK" || {
+            echo "::error::Release APK was not created."
+            exit 1
+          }
+
+          test -s "$BUNDLE" || {
+            echo "::error::React Native release JS bundle was not generated."
+            exit 1
+          }
+
+          unzip -l "$APK" | grep -q "assets/index.android.bundle" || {
+            echo "::error::APK does not contain assets/index.android.bundle. The APK would require Metro and is not standalone."
+            exit 1
+          }
+
+          mkdir -p artifacts
+          cp "$APK" artifacts/GreenStep-Test-Release.apk
+          sha256sum artifacts/GreenStep-Test-Release.apk > artifacts/GreenStep-Test-Release.apk.sha256
+
+          echo "Standalone release APK verified successfully."
+          ls -lh artifacts/GreenStep-Test-Release.apk
+
+      - name: Upload standalone test APK
         uses: actions/upload-artifact@v4
         with:
-          name: greenstep-test-apk-${{ github.run_number }}
-          path: |
-            frontend/EDF-FE/android/app/build/outputs/apk/debug/app-debug.apk
-            greenstep-test-apk.sha256
+          name: GreenStep-Test-Release-APK-${{ github.run_number }}
+          path: artifacts/
           if-no-files-found: error
           retention-days: 14
