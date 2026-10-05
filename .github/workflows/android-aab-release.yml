@@ -43,7 +43,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           cache: npm
           cache-dependency-path: frontend/EDF-FE/package-lock.json
 
@@ -81,7 +81,6 @@ jobs:
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-          KAKAO_NATIVE_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
         run: |
           set -euo pipefail
 
@@ -103,8 +102,7 @@ jobs:
             GOOGLE_CLIENT_ID \
             GOOGLE_MAPS_API_KEY \
             NAVER_CLIENT_ID \
-            NAVER_CLIENT_SECRET \
-            KAKAO_NATIVE_APP_KEY
+            NAVER_CLIENT_SECRET
           do
             test -n "${!name:-}" || {
               echo "::error::Missing release secret: ${name}"
@@ -125,7 +123,6 @@ jobs:
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-          KAKAO_NATIVE_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
         run: |
           cat > .env.production <<EOF
           BASE_URL=${BASE_URL}
@@ -133,17 +130,37 @@ jobs:
           GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
           NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
           NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
-          KAKAO_NATIVE_APP_KEY=${KAKAO_NATIVE_APP_KEY}
-          KAKAO_APP_KEY=${KAKAO_NATIVE_APP_KEY}
           EOF
           cp .env.production .env
 
-      - name: Sync native Android environment
+      - name: Sync Android Google Maps key
         working-directory: frontend/EDF-FE
         shell: bash
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
-          test -f scripts/sync-env.js
-          node scripts/sync-env.js
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import os, re
+
+          path = Path("android/app/src/main/res/values/strings.xml")
+          text = path.read_text(encoding="utf-8")
+          key = os.environ["GOOGLE_MAPS_API_KEY"]
+
+          updated, count = re.subn(
+              r'(<string name="google_maps_api_key">)[^<]*(</string>)',
+              lambda m: m.group(1) + key + m.group(2),
+              text,
+              count=1,
+          )
+
+          if count != 1:
+              raise SystemExit("google_maps_api_key resource was not found exactly once")
+
+          path.write_text(updated, encoding="utf-8")
+          print("Android Google Maps API key synced.")
+          PY
 
       - name: Restore upload keystore
         working-directory: frontend/EDF-FE
