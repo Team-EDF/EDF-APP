@@ -130,6 +130,16 @@ jobs:
 
       - name: Set up Helm
         uses: azure/setup-helm@v4
+        with:
+          # EKS 1.35와 호환되는 Helm 3을 고정한다.
+          # GitHub hosted runner의 Helm 4 자동 전환으로 인한 SSA/CRD ownership 충돌을 방지한다.
+          version: v3.22.0
+
+      - name: Verify Helm version
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm version
 
       - name: Update EKS kubeconfig
         shell: bash
@@ -332,6 +342,8 @@ jobs:
             KEEP_TLS_SECRET=false
           fi
 
+          # CRDs are already managed explicitly by kubectl above.
+          # Helm must not install/apply the same CRDs again.
           helm upgrade --install aws-load-balancer-controller \
             eks/aws-load-balancer-controller \
             --namespace kube-system \
@@ -343,6 +355,7 @@ jobs:
             --set vpcId="${VPC_ID}" \
             --set replicaCount=1 \
             --set keepTLSSecret="${KEEP_TLS_SECRET}" \
+            --skip-crds \
             --atomic \
             --wait \
             --timeout 10m
