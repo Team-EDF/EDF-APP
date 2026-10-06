@@ -301,14 +301,40 @@ jobs:
 
           BACKEND_IMAGE="${ECR_REGISTRY}/edf-backend:${BACKEND_IMAGE_TAG}"
 
+          echo "Building Backend image: ${BACKEND_IMAGE}"
           docker build \
             --pull \
+            --progress=plain \
             --file backend/Dockerfile \
             --tag "${BACKEND_IMAGE}" \
             sources/backend
 
           docker push "${BACKEND_IMAGE}"
           echo "BACKEND_IMAGE=${BACKEND_IMAGE}" >> "${GITHUB_ENV}"
+
+          aws ecr describe-images \
+            --repository-name edf-backend \
+            --image-ids "imageTag=${BACKEND_IMAGE_TAG}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text
+
+      - name: Free Docker build space before AI image
+        shell: bash
+        run: |
+          set +e
+          echo '=== Docker disk usage before cleanup ==='
+          docker system df
+          df -h
+
+          # Backend image is already safely pushed to ECR.
+          # Remove local build layers so the larger AI build has enough runner disk space.
+          docker image rm "${BACKEND_IMAGE}" >/dev/null 2>&1 || true
+          docker builder prune -af >/dev/null 2>&1 || true
+
+          echo '=== Docker disk usage after cleanup ==='
+          docker system df
+          df -h
+          exit 0
 
       - name: Build and push AI image
         shell: bash
@@ -317,14 +343,74 @@ jobs:
 
           AI_IMAGE="${ECR_REGISTRY}/edf-ai:${AI_IMAGE_TAG}"
 
-          docker build \
-            --pull \
-            --file ai/Dockerfile \
-            --tag "${AI_IMAGE}" \
-            sources/ai
+          build_ai_image() {
+            docker build \
+              --pull \
+              --progress=plain \
+              --file ai/Dockerfile \
+              --tag "${AI_IMAGE}" \
+              sources/ai
+          }
 
-          docker push "${AI_IMAGE}"
+          echo "Building AI image: ${AI_IMAGE}"
+          if ! build_ai_image; then
+            echo '::warning::First AI image build failed. Cleaning Docker builder cache and retrying once.'
+            docker system df || true
+            docker builder prune -af || true
+            build_ai_image
+          fi
+
+          pushed=false
+          for attempt in 1 2 3; do
+            echo "Pushing AI image (attempt ${attempt}/3)..."
+            if docker push "${AI_IMAGE}"; then
+              pushed=true
+              break
+            fi
+            sleep $((attempt * 10))
+          done
+
+          if [[ "${pushed}" != "true" ]]; then
+            echo "::error::Failed to push AI image to ECR after 3 attempts: ${AI_IMAGE}"
+            exit 1
+          fi
+
           echo "AI_IMAGE=${AI_IMAGE}" >> "${GITHUB_ENV}"
+
+          aws ecr describe-images \
+            --repository-name edf-ai \
+            --image-ids "imageTag=${AI_IMAGE_TAG}" \
+            --query 'imageDetails[0].imageDigest' \
+            --output text
+
+      - name: Verify deployment images exist in ECR
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          wait_for_image_tag() {
+            local repository="$1"
+            local tag="$2"
+
+            for attempt in $(seq 1 12); do
+              if aws ecr describe-images \
+                --repository-name "${repository}" \
+                --image-ids "imageTag=${tag}" \
+                >/dev/null 2>&1; then
+                echo "ECR verified: ${repository}:${tag}"
+                return 0
+              fi
+
+              echo "Waiting for ECR image ${repository}:${tag} (${attempt}/12)..."
+              sleep 5
+            done
+
+            echo "::error::ECR image is missing after build/push: ${repository}:${tag}"
+            return 1
+          }
+
+          wait_for_image_tag edf-backend "${BACKEND_IMAGE_TAG}"
+          wait_for_image_tag edf-ai "${AI_IMAGE_TAG}"
 
       - name: Export image outputs
         id: images
@@ -447,6 +533,14 @@ jobs:
           wait_for_image backend-depl backend-container "${BACKEND_IMAGE}"
           wait_for_image ai-depl ai-container "${AI_IMAGE}"
 
+          # A fresh Terraform recreation also recreates empty ECR repositories.
+          # ArgoCD may already have created Pods that entered ImagePullBackOff while
+          # the old manifest tags were not yet present. Recreate the Pods now that
+          # both exact image tags have been verified in ECR. This also reloads
+          # ADMIN_EMAIL / ADMIN_PASSWORD and other Secret-backed env values.
+          kubectl delete pods -n "${EDF_NAMESPACE}" -l app=backend --ignore-not-found --wait=false
+          kubectl delete pods -n "${EDF_NAMESPACE}" -l app=ai --ignore-not-found --wait=false
+
           kubectl rollout status deployment/backend-depl \
             -n "${EDF_NAMESPACE}" \
             --timeout=10m
@@ -483,8 +577,16 @@ jobs:
           echo '===== ARGOCD APPLICATIONS ====='
           kubectl get applications -n "${ARGOCD_NAMESPACE}" -o wide
 
+          echo '===== ECR IMAGE TAGS ====='
+          aws ecr list-images --repository-name edf-backend --query 'imageIds[*].imageTag' --output text || true
+          aws ecr list-images --repository-name edf-ai --query 'imageIds[*].imageTag' --output text || true
+
+          echo '===== RUNNER DISK ====='
+          df -h || true
+          docker system df || true
+
           echo '===== RECENT EVENTS ====='
-          kubectl get events -A --sort-by=.lastTimestamp | tail -n 120
+          kubectl get events -A --sort-by=.lastTimestamp | tail -n 120 || true
 
           for app in backend ai; do
             echo "===== ${app^^} PODS ====="
@@ -499,10 +601,12 @@ jobs:
             if [[ -n "${POD}" ]]; then
               echo "===== ${app^^} NEWEST POD: ${POD} ====="
               kubectl describe pod "${POD}" -n "${EDF_NAMESPACE}"
-              kubectl logs "${POD}" -n "${EDF_NAMESPACE}" --tail=200
-              kubectl logs "${POD}" -n "${EDF_NAMESPACE}" --previous --tail=200
+              kubectl logs "${POD}" -n "${EDF_NAMESPACE}" --tail=200 || true
+              kubectl logs "${POD}" -n "${EDF_NAMESPACE}" --previous --tail=200 || true
             fi
           done
+
+          exit 0
 
   build-and-publish-android:
     needs:
