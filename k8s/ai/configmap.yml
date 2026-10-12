@@ -14,3 +14,7 @@ data:
   GEMINI_PROJECT_ID: carbon-ocr-platform-504610
   GEMINI_LOCATION: us-central1
   GOOGLE_CLOUD_PROJECT: carbon-ocr-platform-504610
+  # Latest challenge / household AI runtime switches.
+  CHALLENGE_LLM_ENABLED: "true"
+  CHALLENGE_VERIFY_ENABLED: "true"
+  CHALLENGE_ALLOW_DISCOUNT_ONLY: "true"

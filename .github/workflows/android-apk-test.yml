@@ -61,10 +61,8 @@ jobs:
         shell: bash
         env:
           BASE_URL: ${{ vars.ANDROID_BASE_URL }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: |
           set -euo pipefail
 
@@ -79,10 +77,8 @@ jobs:
           fi
 
           for name in \
-            GOOGLE_CLIENT_ID \
-            GOOGLE_MAPS_API_KEY \
-            NAVER_CLIENT_ID \
-            NAVER_CLIENT_SECRET
+            GOOGLE_WEB_CLIENT_ID \
+            GOOGLE_MAPS_API_KEY
           do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::Missing secret: ${name}"
@@ -104,18 +100,14 @@ jobs:
         shell: bash
         env:
           BASE_URL: ${{ vars.ANDROID_BASE_URL }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: |
           set -euo pipefail
           cat > .env <<EOF
           BASE_URL=${BASE_URL}
-          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+          GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID}
           GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
-          NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
-          NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
           EOF
 
           echo "Android environment file created."

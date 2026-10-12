@@ -21,3 +21,8 @@ data:
   S3_BUCKET_NAME: "edf-user-uploads-edf-556988669310"
   S3_UPLOAD_PREFIX: "receipts"
 
+  # Abuse-prevention limits introduced by the latest Backend.
+  ACTIVITY_DAILY_LIMIT_PER_CATEGORY: "2"
+  ACTIVITY_DAILY_LIMIT_TOTAL: "6"
+  ACTIVITY_IMAGE_MAX_AGE_HOURS: "24"
+  TRANSIT_DAILY_LIMIT: "6"

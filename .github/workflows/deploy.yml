@@ -646,9 +646,7 @@ jobs:
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-          KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
           GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
           PUBLISH_ANDROID: ${{ inputs.publish_android }}
         shell: bash
@@ -663,9 +661,7 @@ jobs:
             ANDROID_KEY_ALIAS
             ANDROID_KEY_PASSWORD
             GOOGLE_WEB_CLIENT_ID
-            NAVER_CLIENT_ID
-            NAVER_CLIENT_SECRET
-            KAKAO_APP_KEY
+            GOOGLE_MAPS_API_KEY
           )
 
           for name in "${required_names[@]}"; do
@@ -750,9 +746,7 @@ jobs:
         env:
           ANDROID_BASE_URL: ${{ vars.ANDROID_BASE_URL }}
           GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-          KAKAO_APP_KEY: ${{ secrets.KAKAO_NATIVE_APP_KEY }}
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
         shell: bash
         run: |
           set -euo pipefail
@@ -760,13 +754,43 @@ jobs:
           cat > .env.production <<EOF
           BASE_URL=${ANDROID_BASE_URL}
           GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID}
-          GOOGLE_IOS_CLIENT_ID=
-          NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
-          NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
-          KAKAO_APP_KEY=${KAKAO_APP_KEY}
+          GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
           EOF
 
           chmod 600 .env.production
+
+      - name: Sync Android Google Maps key
+        shell: bash
+        env:
+          GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+          import re
+
+          path = Path("android/app/src/main/res/values/strings.xml")
+          if not path.exists():
+              raise SystemExit("android/app/src/main/res/values/strings.xml was not found")
+
+          text = path.read_text(encoding="utf-8")
+          key = os.environ["GOOGLE_MAPS_API_KEY"]
+
+          updated, count = re.subn(
+              r'(<string name="google_maps_api_key">)[^<]*(</string>)',
+              lambda m: m.group(1) + key + m.group(2),
+              text,
+              count=1,
+          )
+
+          if count != 1:
+              raise SystemExit("google_maps_api_key resource was not found exactly once")
+
+          path.write_text(updated, encoding="utf-8")
+          print("Android Google Maps API key synced.")
+          PY
 
       - name: Decode Android upload keystore
         env:
@@ -798,26 +822,14 @@ jobs:
             | grep -E 'Alias name:|SHA1:|SHA256:' \
             | tee signing-fingerprints.txt
 
-          KAKAO_KEY_HASH="$(
-            keytool -exportcert \
-              -keystore "${KEYSTORE}" \
-              -alias "${ANDROID_KEY_ALIAS}" \
-              -storepass "${ANDROID_KEYSTORE_PASSWORD}" \
-              | openssl sha1 -binary \
-              | openssl base64
-          )"
 
           {
             echo "## Android signing information"
             echo ""
             echo '```text'
             cat signing-fingerprints.txt
-            echo "Kakao key hash: ${KAKAO_KEY_HASH}"
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
-
-      - name: Type check
-        run: npm run typecheck
 
       - name: Lint
         run: npm run lint

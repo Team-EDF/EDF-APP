@@ -77,10 +77,8 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: |
           set -euo pipefail
 
@@ -99,10 +97,8 @@ jobs:
             KEYSTORE_PASSWORD \
             KEY_ALIAS \
             KEY_PASSWORD \
-            GOOGLE_CLIENT_ID \
-            GOOGLE_MAPS_API_KEY \
-            NAVER_CLIENT_ID \
-            NAVER_CLIENT_SECRET
+            GOOGLE_WEB_CLIENT_ID \
+            GOOGLE_MAPS_API_KEY
           do
             test -n "${!name:-}" || {
               echo "::error::Missing release secret: ${name}"
@@ -119,17 +115,13 @@ jobs:
         shell: bash
         env:
           BASE_URL: ${{ vars.ANDROID_BASE_URL }}
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_WEB_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_MAPS_API_KEY: ${{ secrets.GOOGLE_MAPS_API_KEY }}
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: |
           cat > .env.production <<EOF
           BASE_URL=${BASE_URL}
-          GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+          GOOGLE_WEB_CLIENT_ID=${GOOGLE_WEB_CLIENT_ID}
           GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
-          NAVER_CLIENT_ID=${NAVER_CLIENT_ID}
-          NAVER_CLIENT_SECRET=${NAVER_CLIENT_SECRET}
           EOF
           cp .env.production .env
 
