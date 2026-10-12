@@ -128,6 +128,8 @@ jobs:
           GIT_USER_EMAIL: ${{ vars.USER_EMAIL }}
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          NAVER_API_HUB_CLIENT_ID: ${{ secrets.NAVER_API_HUB_CLIENT_ID }}
+          NAVER_API_HUB_CLIENT_SECRET: ${{ secrets.NAVER_API_HUB_CLIENT_SECRET }}
         shell: bash
         run: |
           set -euo pipefail
@@ -139,6 +141,8 @@ jobs:
             GIT_USER_EMAIL
             ADMIN_EMAIL
             ADMIN_PASSWORD
+            NAVER_API_HUB_CLIENT_ID
+            NAVER_API_HUB_CLIENT_SECRET
           )
 
           for name in "${required_names[@]}"; do
@@ -251,16 +255,19 @@ jobs:
           echo '=== Existing Pending Pods (informational) ==='
           kubectl get pods -A --field-selector=status.phase=Pending -o wide || true
 
-      - name: Sync Backend admin credentials
+      - name: Sync Backend admin and Naver news credentials
         env:
           ADMIN_EMAIL: ${{ secrets.ADMIN_EMAIL }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          NAVER_API_HUB_CLIENT_ID: ${{ secrets.NAVER_API_HUB_CLIENT_ID }}
+          NAVER_API_HUB_CLIENT_SECRET: ${{ secrets.NAVER_API_HUB_CLIENT_SECRET }}
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ -z "${ADMIN_EMAIL:-}" || -z "${ADMIN_PASSWORD:-}" ]]; then
-            echo "::error::ADMIN_EMAIL and ADMIN_PASSWORD GitHub Secrets are required."
+          if [[ -z "${ADMIN_EMAIL:-}" || -z "${ADMIN_PASSWORD:-}" || \
+                -z "${NAVER_API_HUB_CLIENT_ID:-}" || -z "${NAVER_API_HUB_CLIENT_SECRET:-}" ]]; then
+            echo "::error::Backend admin and NAVER_API_HUB_CLIENT_ID / NAVER_API_HUB_CLIENT_SECRET GitHub Secrets are required."
             exit 1
           fi
 
@@ -271,13 +278,16 @@ jobs:
 
           ADMIN_EMAIL_B64="$(printf '%s' "${ADMIN_EMAIL}" | base64 -w 0)"
           ADMIN_PASSWORD_B64="$(printf '%s' "${ADMIN_PASSWORD}" | base64 -w 0)"
+          NAVER_API_HUB_CLIENT_ID_B64="$(printf '%s' "${NAVER_API_HUB_CLIENT_ID}" | base64 -w 0)"
+          NAVER_API_HUB_CLIENT_SECRET_B64="$(printf '%s' "${NAVER_API_HUB_CLIENT_SECRET}" | base64 -w 0)"
 
+          # Merge only these keys to preserve DB/JWT/MAIL/GOOGLE and other existing secrets.
           kubectl patch secret backend-secret \
             -n "${EDF_NAMESPACE}" \
             --type merge \
-            --patch "{\"data\":{\"ADMIN_EMAIL\":\"${ADMIN_EMAIL_B64}\",\"ADMIN_PASSWORD\":\"${ADMIN_PASSWORD_B64}\"}}"
+            --patch "{\"data\":{\"ADMIN_EMAIL\":\"${ADMIN_EMAIL_B64}\",\"ADMIN_PASSWORD\":\"${ADMIN_PASSWORD_B64}\",\"NAVER_API_HUB_CLIENT_ID\":\"${NAVER_API_HUB_CLIENT_ID_B64}\",\"NAVER_API_HUB_CLIENT_SECRET\":\"${NAVER_API_HUB_CLIENT_SECRET_B64}\"}}"
 
-          echo "Backend admin credentials synchronized to backend-secret."
+          echo "Backend admin and Naver news credentials synchronized to backend-secret."
 
       - name: Resolve and validate ECR
         shell: bash
