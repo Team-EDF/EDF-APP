@@ -132,6 +132,21 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: GOOGLE_API_KEY
+            - name: NAVER_API_HUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: NAVER_API_HUB_CLIENT_ID
+            - name: NAVER_API_HUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secret
+                  key: NAVER_API_HUB_CLIENT_SECRET
+            - name: NAVER_NEWS_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: NAVER_NEWS_API_URL
             - name: JWT_ACCESS_EXP
               valueFrom:
                 configMapKeyRef:
