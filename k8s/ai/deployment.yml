@@ -110,6 +110,21 @@ spec:
                 configMapKeyRef:
                   name: ai-config
                   key: GOOGLE_CLOUD_PROJECT
+            - name: CHALLENGE_LLM_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: CHALLENGE_LLM_ENABLED
+            - name: CHALLENGE_VERIFY_ENABLED
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: CHALLENGE_VERIFY_ENABLED
+            - name: CHALLENGE_ALLOW_DISCOUNT_ONLY
+              valueFrom:
+                configMapKeyRef:
+                  name: ai-config
+                  key: CHALLENGE_ALLOW_DISCOUNT_ONLY
           readinessProbe:
             httpGet:
               path: /health

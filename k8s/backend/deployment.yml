@@ -127,41 +127,11 @@ spec:
                 secretKeyRef:
                   name: backend-secret
                   key: GOOGLE_CLIENT_ID
-            - name: GOOGLE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: GOOGLE_CLIENT_SECRET
-            - name: NAVER_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: NAVER_CLIENT_ID
-            - name: NAVER_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: NAVER_CLIENT_SECRET
-            - name: KAKAO_CLIENT_ID
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: KAKAO_CLIENT_ID
-            - name: KAKAO_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: KAKAO_CLIENT_SECRET
             - name: GOOGLE_API_KEY
               valueFrom:
                 secretKeyRef:
                   name: backend-secret
                   key: GOOGLE_API_KEY
-            - name: KAKAO_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: backend-secret
-                  key: KAKAO_API_KEY
             - name: JWT_ACCESS_EXP
               valueFrom:
                 configMapKeyRef:
@@ -177,6 +147,26 @@ spec:
                 configMapKeyRef:
                   name: backend-config
                   key: FILE_UPLOAD_DIR
+            - name: ACTIVITY_DAILY_LIMIT_PER_CATEGORY
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: ACTIVITY_DAILY_LIMIT_PER_CATEGORY
+            - name: ACTIVITY_DAILY_LIMIT_TOTAL
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: ACTIVITY_DAILY_LIMIT_TOTAL
+            - name: ACTIVITY_IMAGE_MAX_AGE_HOURS
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: ACTIVITY_IMAGE_MAX_AGE_HOURS
+            - name: TRANSIT_DAILY_LIMIT
+              valueFrom:
+                configMapKeyRef:
+                  name: backend-config
+                  key: TRANSIT_DAILY_LIMIT
           readinessProbe:
             httpGet:
               path: /actuator/health/readiness

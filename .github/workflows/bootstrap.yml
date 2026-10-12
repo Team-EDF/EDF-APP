@@ -62,17 +62,11 @@ jobs:
           MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
 
+          # Web application OAuth Client ID used as Google ID-token audience.
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-
-          KAKAO_CLIENT_ID: ${{ secrets.KAKAO_CLIENT_ID }}
-          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
 
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
 
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON }}
@@ -98,13 +92,7 @@ jobs:
             MAIL_USERNAME
             MAIL_APP_PASSWORD
             GOOGLE_CLIENT_ID
-            GOOGLE_CLIENT_SECRET
-            NAVER_CLIENT_ID
-            NAVER_CLIENT_SECRET
-            KAKAO_CLIENT_ID
-            KAKAO_CLIENT_SECRET
             GOOGLE_API_KEY
-            KAKAO_API_KEY
             OPENAI_API_KEY
             GOOGLE_CLOUD_SERVICE_ACCOUNT_JSON
             GH_PAT
@@ -503,16 +491,9 @@ jobs:
           MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
 
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
-          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
-          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-
-          KAKAO_CLIENT_ID: ${{ secrets.KAKAO_CLIENT_ID }}
-          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
 
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          KAKAO_API_KEY: ${{ secrets.KAKAO_API_KEY }}
 
         shell: bash
         run: |
@@ -531,13 +512,7 @@ jobs:
             --from-literal=MAIL_USERNAME="${MAIL_USERNAME}" \
             --from-literal=MAIL_APP_PASSWORD="${MAIL_APP_PASSWORD}" \
             --from-literal=GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
-            --from-literal=GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
-            --from-literal=NAVER_CLIENT_ID="${NAVER_CLIENT_ID}" \
-            --from-literal=NAVER_CLIENT_SECRET="${NAVER_CLIENT_SECRET}" \
-            --from-literal=KAKAO_CLIENT_ID="${KAKAO_CLIENT_ID}" \
-            --from-literal=KAKAO_CLIENT_SECRET="${KAKAO_CLIENT_SECRET}" \
             --from-literal=GOOGLE_API_KEY="${GOOGLE_API_KEY}" \
-            --from-literal=KAKAO_API_KEY="${KAKAO_API_KEY}" \
             --dry-run=client \
             -o yaml | kubectl apply -f -
 
